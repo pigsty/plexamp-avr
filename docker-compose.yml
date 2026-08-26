@@ -6,5 +6,5 @@ services:
     container_name: plexamp-avr
     restart: unless-stopped
     network_mode: host
-    environment:
-      - PYTHONUNBUFFERED=1
+    volumes:
+      - /etc/plexamp-avr.conf:/etc/plexamp-avr.conf:ro
