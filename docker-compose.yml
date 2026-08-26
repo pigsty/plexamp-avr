@@ -1,0 +1,10 @@
+version: '3.8'
+
+services:
+  plexamp-avr:
+    build: .
+    container_name: plexamp-avr
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - PYTHONUNBUFFERED=1
