@@ -27,21 +27,20 @@ class PlexampClient:
     def __init__(self, host: str, port: int, timeout: float = 30.0):
         self.base_url = f"http://{host}:{port}"
         self.timeout = timeout
+        LOGGER.info("Plexamp client initialized with base URL: %s", self.base_url)
 
     def poll(self) -> PlaybackState:
         command_id = int(time.time() * 1000)
         url = (
             f"{self.base_url}/player/timeline/poll?type=music&wait=1"
-            f"&includeMetadata=1&commandID={command_id}"
+            f"&commandID={command_id}"
         )
         LOGGER.debug("Polling Plexamp URL: %s", url)
 
         request = Request(url, headers={"Accept": "text/xml, application/xml"})
         with urlopen(request, timeout=self.timeout) as response:
-            status = response.status
+            LOGGER.debug("Received response from Plexamp: %d", response.status)
             raw_body = response.read().strip()
-
-        LOGGER.debug("Plexamp response status: %d, body: %r", status, raw_body)
 
         if not raw_body:
             LOGGER.debug("Received empty response body from Plexamp")
@@ -71,5 +70,5 @@ class PlexampClient:
         try:
             return self.poll()
         except (OSError, URLError) as err:
-            LOGGER.warning("Plexamp poll network connection failed: %s", err)
+            LOGGER.warning("Plexamp poll network connection to host %s failed: %s", self.base_url, err)
             return PlaybackState("unknown")

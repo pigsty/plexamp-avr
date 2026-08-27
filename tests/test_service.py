@@ -45,7 +45,7 @@ class FakeAvr:
 
 class ServiceTests(unittest.TestCase):
     def config(self, **changes):
-        values = dict(avr_input="PLEX", off_timer_seconds=60, preset_volume_db=-35.0, power_on_delay_seconds=4)
+        values = dict(avr_input="PLEX", off_timer_seconds=60, preset_volume=35, power_on_delay_seconds=4)
         values.update(changes)
         return Config(**values)
 
@@ -53,7 +53,7 @@ class ServiceTests(unittest.TestCase):
         avr = FakeAvr()
         controller = AvrController(FakePlexamp(["playing"]), avr, self.config(), FakeClock())
         controller.step()
-        self.assertEqual(avr.calls, [("on", "PLEX", -35.0, 4)])
+        self.assertEqual(avr.calls, [("on", "PLEX", 35, 4)])
 
     def test_wrong_input_is_never_stopped(self):
         clock = FakeClock()

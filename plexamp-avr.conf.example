@@ -6,6 +6,6 @@ avr_port = 23
 avr_input = MEDIA PLAYER
 off_timer_seconds = 900
 # Leave empty to keep the AVR's current volume.
-preset_volume_db = -35.0
+preset_volume = 60
 power_on_delay_seconds = 5.0
 request_timeout_seconds = 30.0

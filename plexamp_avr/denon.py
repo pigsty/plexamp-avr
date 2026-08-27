@@ -8,51 +8,76 @@ LOGGER = logging.getLogger(__name__)
 
 
 class DenonClient:
-    def __init__(self, address: str, port: int = 23, timeout: float = 5.0):
+    def __init__(self, address: str, port: int = 23, timeout: float = 2.0):
         self.address = address
         self.port = port
         self.timeout = timeout
+        LOGGER.info("Denon client initialized with address: %s:%d", self.address, self.port)
 
-    def command(self, value: str) -> list[str]:
-        with socket.create_connection((self.address, self.port), self.timeout) as connection:
-            connection.settimeout(self.timeout)
-            connection.sendall((value + "\r").encode("ascii"))
-            data = bytearray()
-            try:
+    def command(self, value: str, wait_for_response_prefix: str | None = None) -> list[str]:
+        replies = []
+        try:
+            with socket.create_connection((self.address, self.port), self.timeout) as connection:
+                connection.settimeout(self.timeout)
+                connection.sendall((value + "\r").encode("ascii"))
+                
+                buffer = ""
                 while True:
-                    chunk = connection.recv(4096)
-                    if not chunk:
+                    try:
+                        chunk = connection.recv(4096).decode("ascii", errors="replace")
+                        if not chunk:
+                            break
+                        buffer += chunk
+                        
+                        # Process complete lines terminated by \r
+                        while "\r" in buffer:
+                            line, buffer = buffer.split("\r", 1)
+                            line = line.strip()
+                            if line:
+                                replies.append(line)
+                                # Exit immediately if we found the line we were waiting for
+                                if wait_for_response_prefix and line.startswith(wait_for_response_prefix):
+                                    LOGGER.debug("Received target response %r for %r", line, value)
+                                    return replies
+                    except socket.timeout:
+                        # Fallback timeout if wait_for_response_prefix is never sent by AVR
+                        LOGGER.debug("Socket timeout reached while waiting for %r", value)
                         break
-                    data.extend(chunk)
-                    if b"\r" in data:
-                        break
-            except socket.timeout:
-                pass
-        return [line for line in data.decode("ascii", errors="replace").splitlines() if line]
+
+        except (socket.timeout, OSError) as err:
+            LOGGER.warning("Denon Telnet command %r failed: %s", value, err)
+
+        return replies
 
     def power_state(self) -> str:
-        replies = self.command("PW?")
-        return next((reply[2:].upper() for reply in replies if reply.startswith("PW")), "UNKNOWN")
+        replies = self.command("ZM?", wait_for_response_prefix="ZM")
+        for reply in replies:
+            if reply.startswith("ZM"):
+                return reply[2:].upper()
+        return "UNKNOWN"
 
     def input_name(self) -> str | None:
-        replies = self.command("SI?")
-        return next((reply[2:] for reply in replies if reply.startswith("SI")), None)
-
+        replies = self.command("SI?", wait_for_response_prefix="SI")
+        for reply in replies:
+            if reply.startswith("SI"):
+                return reply[2:]
+        return None
+    
     def is_on(self) -> bool:
         return self.power_state() == "ON"
 
     def power_on(self) -> None:
-        self.command("PWON")
+        self.command("ZMON")
 
     def standby(self) -> None:
-        self.command("PWSTANDBY")
+        self.command("ZMOFF")
 
     def set_input(self, input_name: str) -> None:
         self.command("SI" + input_name)
 
-    def set_volume_db(self, volume_db: float) -> None:
-        if volume_db > 0 or volume_db < -80:
-            raise ValueError("preset volume must be between -80 and 0 dB")
+    def set_volume(self, volume_db: float) -> None:
+        if volume_db > 98 or volume_db < 0:
+            raise ValueError("preset volume must be between 0 and 98")
         value = abs(volume_db)
         command_value = f"{value:.1f}".replace(".", "") if value % 1 else f"{int(value)}"
         self.command("MV" + command_value)
@@ -62,4 +87,4 @@ class DenonClient:
         time.sleep(delay)
         self.set_input(input_name)
         if volume_db is not None:
-            self.set_volume_db(volume_db)
+            self.set_volume(volume_db)

@@ -22,7 +22,7 @@ docker run -d \
   plexamp-avr
 ```
 
-The installer uses only Python's standard library. Configure `plexamp_host`, `plexamp_port`, `avr_host`, `avr_input`, `off_timer_seconds`, and optionally `preset_volume_db`. Volume values are Denon dB values such as `-35.0`; leave it empty to skip volume changes. The Plexamp defaults are `localhost:32500`.
+The installer uses only Python's standard library. Configure `plexamp_host`, `plexamp_port`, `avr_host`, `avr_input`, `off_timer_seconds`, and optionally `preset_volume`. Volume values are Denon values between 0 and 98; leave it empty to skip volume changes. The Plexamp defaults are `localhost:32500`.
 
 ## Development
 
