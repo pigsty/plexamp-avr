@@ -15,7 +15,7 @@ class Config:
     off_timer_seconds: int = 900
     preset_volume: float | None = None
     power_on_delay_seconds: float = 5.0
-    request_timeout_seconds: float = 30.0
+    request_timeout_seconds: float = 5.0
 
     @classmethod
     def from_file(cls, path: str | Path) -> "Config":

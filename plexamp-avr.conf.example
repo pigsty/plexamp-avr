@@ -8,4 +8,4 @@ off_timer_seconds = 900
 # Leave empty to keep the AVR's current volume.
 preset_volume = 60
 power_on_delay_seconds = 5.0
-request_timeout_seconds = 30.0
+request_timeout_seconds = 5.0

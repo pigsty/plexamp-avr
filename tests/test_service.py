@@ -7,7 +7,7 @@ from plexamp_avr.service import AvrController
 
 class FakeClock:
     def __init__(self):
-        self.value = 0
+        self.value = 0.0
 
     def monotonic(self):
         return self.value
@@ -45,7 +45,12 @@ class FakeAvr:
 
 class ServiceTests(unittest.TestCase):
     def config(self, **changes):
-        values = dict(avr_input="PLEX", off_timer_seconds=60, preset_volume=35, power_on_delay_seconds=4)
+        values = dict(
+            avr_input="PLEX",
+            off_timer_seconds=60,
+            preset_volume=-35.0,
+            power_on_delay_seconds=4.0,
+        )
         values.update(changes)
         return Config(**values)
 
@@ -53,33 +58,55 @@ class ServiceTests(unittest.TestCase):
         avr = FakeAvr()
         controller = AvrController(FakePlexamp(["playing"]), avr, self.config(), FakeClock())
         controller.step()
-        self.assertEqual(avr.calls, [("on", "PLEX", 35, 4)])
+        self.assertEqual(avr.calls, [("on", "PLEX", -35.0, 4.0)])
 
     def test_wrong_input_is_never_stopped(self):
         clock = FakeClock()
         avr = FakeAvr(on=True, input_name="GAME")
-        controller = AvrController(FakePlexamp(["playing", "stopped"]), avr, self.config(), clock)
-        controller.step()
-        clock.value = 61
-        controller.step()
+        controller = AvrController(FakePlexamp(["playing", "stopped", "stopped"]), avr, self.config(), clock)
+        controller.step()  # playing at t=0
+        controller.step()  # transitions to stopped at t=0 (idle_start_time = 0.0)
+        clock.value = 60.0
+        controller.step()  # checked at t=60 (timer expired)
         self.assertEqual(avr.calls, [])
 
-    def test_expected_input_is_stopped_after_timer(self):
+    def test_expected_input_is_stopped_after_timer_when_plexamp_stopped(self):
         clock = FakeClock()
         avr = FakeAvr(on=True, input_name="PLEX")
-        controller = AvrController(FakePlexamp(["playing", "stopped"]), avr, self.config(), clock)
-        controller.step()
-        clock.value = 60
-        controller.step()
+        controller = AvrController(FakePlexamp(["playing", "stopped", "stopped"]), avr, self.config(), clock)
+        controller.step()  # playing at t=0
+        controller.step()  # transitions to stopped at t=0 (idle_start_time = 0.0)
+        clock.value = 60.0
+        controller.step()  # checked at t=60 (timer expired)
         self.assertEqual(avr.calls[-1], ("standby",))
+
+    def test_expected_input_is_stopped_after_timer_when_plexamp_paused(self):
+        clock = FakeClock()
+        avr = FakeAvr(on=True, input_name="PLEX")
+        controller = AvrController(FakePlexamp(["playing", "paused", "paused"]), avr, self.config(), clock)
+        controller.step()  # playing at t=0
+        controller.step()  # transitions to paused at t=0 (idle_start_time = 0.0)
+        clock.value = 60.0
+        controller.step()  # checked at t=60 (timer expired)
+        self.assertEqual(avr.calls[-1], ("standby",))
+
+    def test_startup_while_paused_starts_timer_and_stops_avr(self):
+        clock = FakeClock()
+        avr = FakeAvr(on=True, input_name="PLEX")
+        controller = AvrController(FakePlexamp(["paused", "paused"]), avr, self.config(), clock)
+        controller.step()  # startup while paused at t=0 (idle_start_time = 0.0)
+        self.assertEqual(avr.calls, [])
+        clock.value = 60.0
+        controller.step()  # checked at t=60 (timer expired)
+        self.assertEqual(avr.calls, [("standby",)])
 
     def test_unknown_poll_does_not_stop_avr(self):
         clock = FakeClock()
         avr = FakeAvr(on=True, input_name="PLEX")
         controller = AvrController(FakePlexamp(["playing", "unknown"]), avr, self.config(), clock)
-        controller.step()
-        clock.value = 61
-        controller.step()
+        controller.step()  # playing at t=0
+        clock.value = 61.0
+        controller.step()  # unknown state at t=61 (ignored)
         self.assertEqual(avr.calls, [])
 
 

@@ -14,12 +14,17 @@ class DenonClient:
         self.timeout = timeout
         LOGGER.info("Denon client initialized with address: %s:%d", self.address, self.port)
 
-    def command(self, value: str, wait_for_response_prefix: str | None = None) -> list[str]:
+    def command(self, cmd: str, arg: str = "") -> list[str]:
+        full_command = f"{cmd}{arg}"
+        is_query = arg == "?"
+        LOGGER.debug("Sending command to Denon AVR: %r (is_query=%s)", full_command, is_query)
+        
         replies = []
         try:
             with socket.create_connection((self.address, self.port), self.timeout) as connection:
-                connection.settimeout(self.timeout)
-                connection.sendall((value + "\r").encode("ascii"))
+                # Use a shorter timeout for reading responses after sending
+                connection.settimeout(self.timeout if is_query else 0.3)
+                connection.sendall((full_command + "\r").encode("ascii"))
                 
                 buffer = ""
                 while True:
@@ -35,29 +40,30 @@ class DenonClient:
                             line = line.strip()
                             if line:
                                 replies.append(line)
-                                # Exit immediately if we found the line we were waiting for
-                                if wait_for_response_prefix and line.startswith(wait_for_response_prefix):
-                                    LOGGER.debug("Received target response %r for %r", line, value)
+                                LOGGER.debug("Received reply from Denon AVR: %r", line)
+                                
+                                # If it's a query and we got our matching prefix, exit immediately
+                                if is_query and line.startswith(cmd):
+                                    LOGGER.debug("Received query response %r for %r", line, full_command)
                                     return replies
                     except socket.timeout:
-                        # Fallback timeout if wait_for_response_prefix is never sent by AVR
-                        LOGGER.debug("Socket timeout reached while waiting for %r", value)
+                        # For set commands or missing query responses, exit loop cleanly on timeout
                         break
 
         except (socket.timeout, OSError) as err:
-            LOGGER.warning("Denon Telnet command %r failed: %s", value, err)
+            LOGGER.warning("Denon Telnet command %r failed: %s", full_command, err)
 
         return replies
 
     def power_state(self) -> str:
-        replies = self.command("ZM?", wait_for_response_prefix="ZM")
+        replies = self.command("ZM", "?")
         for reply in replies:
             if reply.startswith("ZM"):
                 return reply[2:].upper()
         return "UNKNOWN"
 
     def input_name(self) -> str | None:
-        replies = self.command("SI?", wait_for_response_prefix="SI")
+        replies = self.command("SI", "?")
         for reply in replies:
             if reply.startswith("SI"):
                 return reply[2:]
@@ -67,24 +73,24 @@ class DenonClient:
         return self.power_state() == "ON"
 
     def power_on(self) -> None:
-        self.command("ZMON")
+        self.command("ZM", "ON")
 
     def standby(self) -> None:
-        self.command("ZMOFF")
+        self.command("ZM", "OFF")
 
     def set_input(self, input_name: str) -> None:
-        self.command("SI" + input_name)
+        self.command("SI", input_name)
 
-    def set_volume(self, volume_db: float) -> None:
-        if volume_db > 98 or volume_db < 0:
+    def set_volume(self, volume: float) -> None:
+        if volume > 98 or volume < 0:
             raise ValueError("preset volume must be between 0 and 98")
-        value = abs(volume_db)
-        command_value = f"{value:.1f}".replace(".", "") if value % 1 else f"{int(value)}"
-        self.command("MV" + command_value)
+        value = abs(volume)
+        arg_value = f"{value:.1f}".replace(".", "") if value % 1 else f"{int(value)}"
+        self.command("MV", arg_value)
 
-    def power_on_and_configure(self, input_name: str, volume_db: float | None, delay: float) -> None:
+    def power_on_and_configure(self, input_name: str, volume: float | None, delay: float) -> None:
         self.power_on()
         time.sleep(delay)
         self.set_input(input_name)
-        if volume_db is not None:
-            self.set_volume(volume_db)
+        if volume is not None:
+            self.set_volume(volume)
