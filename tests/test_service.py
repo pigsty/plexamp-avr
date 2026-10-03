@@ -43,6 +43,17 @@ class FakeAvr:
         self.on = False
 
 
+class FakeWebhooks:
+    def __init__(self):
+        self.events = []
+
+    def idle_timer_started(self, state, timeout_seconds):
+        self.events.append(("started", state, timeout_seconds))
+
+    def idle_timer_stopped(self, state, reason):
+        self.events.append(("stopped", state, reason))
+
+
 class ServiceTests(unittest.TestCase):
     def config(self, **changes):
         values = dict(
@@ -108,6 +119,34 @@ class ServiceTests(unittest.TestCase):
         clock.value = 61.0
         controller.step()  # unknown state at t=61 (ignored)
         self.assertEqual(avr.calls, [])
+
+    def test_webhooks_called_when_idle_timer_starts_and_is_cancelled(self):
+        webhooks = FakeWebhooks()
+        avr = FakeAvr(on=True, input_name="PLEX")
+        controller = AvrController(
+            FakePlexamp(["playing", "paused", "paused", "playing", "playing"]),
+            avr, self.config(), FakeClock(), webhooks,
+        )
+        for _ in range(5):
+            controller.step()
+        self.assertEqual(webhooks.events, [
+            ("started", "paused", 60),
+            ("stopped", "playing", "playback_resumed"),
+        ])
+
+    def test_webhooks_called_when_idle_timer_expires(self):
+        clock = FakeClock()
+        webhooks = FakeWebhooks()
+        avr = FakeAvr(on=True, input_name="PLEX")
+        controller = AvrController(FakePlexamp(["stopped", "stopped", "stopped"]), avr, self.config(), clock, webhooks)
+        controller.step()
+        clock.value = 60.0
+        controller.step()
+        controller.step()
+        self.assertEqual(webhooks.events, [
+            ("started", "stopped", 60),
+            ("stopped", "stopped", "expired"),
+        ])
 
 
 if __name__ == "__main__":

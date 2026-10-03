@@ -8,6 +8,7 @@ from typing import Protocol
 from .config import Config
 from .denon import DenonClient
 from .plexamp import PlexampClient
+from .webhook import WebhookClient
 
 LOGGER = logging.getLogger(__name__)
 
@@ -23,11 +24,19 @@ class SystemClock:
 
 
 class AvrController:
-    def __init__(self, plexamp: PlexampClient, avr: DenonClient, config: Config, clock: Clock | None = None):
+    def __init__(
+        self,
+        plexamp: PlexampClient,
+        avr: DenonClient,
+        config: Config,
+        clock: Clock | None = None,
+        webhooks: WebhookClient | None = None,
+    ):
         self.plexamp = plexamp
         self.avr = avr
         self.config = config
         self.clock = clock or SystemClock()
+        self.webhooks = webhooks
         self.previous_state: str | None = None
         self.idle_start_time: float | None = None
 
@@ -43,11 +52,12 @@ class AvrController:
 
         # Handle Initial Startup while Paused/Stopped
         if self.previous_state is None and not current_state.is_playing:
-            self.idle_start_time = now
+            self._start_idle_timer(now, state_name)
 
         # 2. Transition: Transitioning TO Playing
         if current_state.is_playing:
-            self.idle_start_time = None
+            if self.idle_start_time is not None:
+                self._stop_idle_timer(state_name, "playback_resumed")
             if self.previous_state != state_name:
                 if not self.avr.is_on():
                     LOGGER.info("Playback started; powering AVR on")
@@ -62,7 +72,7 @@ class AvrController:
         # 3. Transition: Transitioning FROM Playing TO Idle (Paused/Stopped)
         elif self.previous_state and self.previous_state in {"playing", "buffering"}:
             LOGGER.info("Playback changed to %s; starting %ds idle timer", state_name, self.config.off_timer_seconds)
-            self.idle_start_time = now
+            self._start_idle_timer(now, state_name)
 
         # 4. Sustained Idle Timer Expiration Check
         if self.idle_start_time is not None and (now - self.idle_start_time) >= self.config.off_timer_seconds:
@@ -77,10 +87,20 @@ class AvrController:
                 LOGGER.info("Idle timeout reached, but AVR is already off; no action taken")
             
             # Reset timer after firing so it only fires once per idle session
-            self.idle_start_time = None
+            self._stop_idle_timer(state_name, "expired")
 
         # Record current state for the next step comparison
         self.previous_state = state_name
+
+    def _start_idle_timer(self, now: float, state_name: str) -> None:
+        self.idle_start_time = now
+        if self.webhooks is not None:
+            self.webhooks.idle_timer_started(state_name, self.config.off_timer_seconds)
+
+    def _stop_idle_timer(self, state_name: str, reason: str) -> None:
+        self.idle_start_time = None
+        if self.webhooks is not None:
+            self.webhooks.idle_timer_stopped(state_name, reason)
 
     def run(self) -> None:
         while True:
@@ -92,4 +112,10 @@ def build_controller(config: Config) -> AvrController:
         PlexampClient(config.plexamp_host, config.plexamp_port, config.request_timeout_seconds),
         DenonClient(config.avr_host, config.avr_port, config.request_timeout_seconds),
         config,
+        webhooks=WebhookClient(
+            config.idle_timer_start_webhook_url,
+            config.idle_timer_stop_webhook_url,
+            config.webhook_method,
+            config.request_timeout_seconds,
+        ),
     )
