@@ -26,7 +26,7 @@ The installer uses only Python's standard library. Configure `plexamp_host`, `pl
 
 ### Idle timer webhooks
 
-Set `idle_timer_start_webhook_url` and/or `idle_timer_stop_webhook_url` to have the service call an external URL when the idle timer starts and stops. `webhook_method` selects the HTTP method (default `POST`). Calls are made in the background, use `request_timeout_seconds`, and failures are only logged. For non-`GET` methods a JSON body is sent:
+Set `idle_timer_start_webhook_url` and/or `idle_timer_stop_webhook_url` to have the service call an external URL when the idle timer starts and stops. `webhook_method` selects the HTTP method (`GET`, `POST`, `PUT` or `PATCH`; default `POST`). Calls are made in the background, use `request_timeout_seconds`, and failures are only logged. For non-`GET` methods a JSON body is sent:
 
 ```json
 {"event": "idle_timer_started", "state": "paused", "timeout_seconds": 900, "timestamp": 1760000000.0}

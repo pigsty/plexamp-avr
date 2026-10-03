@@ -62,9 +62,9 @@ class WebhookClient:
     def _post(self, url: str, payload: dict) -> None:
         data = json.dumps(payload).encode("utf-8") if self.method != "GET" else None
         headers = {"Content-Type": "application/json"} if data is not None else {}
-        request = Request(url, data=data, headers=headers, method=self.method)
         LOGGER.debug("Calling webhook %s %s with %r", self.method, url, payload)
         try:
+            request = Request(url, data=data, headers=headers, method=self.method)
             with urlopen(request, timeout=self.timeout) as response:
                 LOGGER.info("Webhook %s %s returned %d", self.method, url, response.status)
         except Exception as err:  # noqa: BLE001 - webhook failures must never stop the service
