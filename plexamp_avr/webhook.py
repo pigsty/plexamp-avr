@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 import logging
+import queue
 import threading
 import time
-from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 LOGGER = logging.getLogger(__name__)
@@ -24,6 +24,8 @@ class WebhookClient:
         self.method = method.upper()
         self.timeout = timeout
         self.background = background
+        self._queue: queue.Queue[tuple[str, dict]] = queue.Queue()
+        self._worker: threading.Thread | None = None
 
     def idle_timer_started(self, state: str, timeout_seconds: int) -> None:
         self._send(self.start_url, {
@@ -44,8 +46,17 @@ class WebhookClient:
             return
         payload = {**payload, "timestamp": time.time()}
         if self.background:
-            threading.Thread(target=self._post, args=(url, payload), daemon=True).start()
+            # A single worker keeps events delivered in the order they occurred.
+            if self._worker is None:
+                self._worker = threading.Thread(target=self._drain, daemon=True)
+                self._worker.start()
+            self._queue.put((url, payload))
         else:
+            self._post(url, payload)
+
+    def _drain(self) -> None:
+        while True:
+            url, payload = self._queue.get()
             self._post(url, payload)
 
     def _post(self, url: str, payload: dict) -> None:
@@ -56,5 +67,5 @@ class WebhookClient:
         try:
             with urlopen(request, timeout=self.timeout) as response:
                 LOGGER.info("Webhook %s %s returned %d", self.method, url, response.status)
-        except (OSError, URLError, ValueError) as err:
+        except Exception as err:  # noqa: BLE001 - webhook failures must never stop the service
             LOGGER.warning("Webhook %s %s failed: %s", self.method, url, err)

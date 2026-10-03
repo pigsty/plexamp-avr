@@ -4,6 +4,8 @@ import configparser
 from dataclasses import dataclass
 from pathlib import Path
 
+WEBHOOK_METHODS = frozenset({"GET", "POST", "PUT", "PATCH"})
+
 
 @dataclass(frozen=True)
 class Config:
@@ -19,6 +21,10 @@ class Config:
     idle_timer_start_webhook_url: str | None = None
     idle_timer_stop_webhook_url: str | None = None
     webhook_method: str = "POST"
+
+    def __post_init__(self) -> None:
+        if self.webhook_method not in WEBHOOK_METHODS:
+            raise ValueError(f"webhook_method must be one of {', '.join(sorted(WEBHOOK_METHODS))}")
 
     @classmethod
     def from_file(cls, path: str | Path) -> "Config":

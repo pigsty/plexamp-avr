@@ -55,6 +55,16 @@ class WebhookClientTests(unittest.TestCase):
         client = WebhookClient("http://127.0.0.1:1/nope", None, timeout=1, background=False)
         client.idle_timer_started("stopped", 60)
 
+    def test_background_delivery_preserves_order(self):
+        client = WebhookClient(f"{self.base}/start", f"{self.base}/stop")
+        client.idle_timer_started("paused", 900)
+        client.idle_timer_stopped("playing", "playback_resumed")
+        for _ in range(100):
+            if len(self.server.requests) == 2:
+                break
+            threading.Event().wait(0.05)
+        self.assertEqual([path for _, path, _ in self.server.requests], ["/start", "/stop"])
+
 
 class ConfigTests(unittest.TestCase):
     def test_webhook_options_parsed(self):
@@ -70,6 +80,10 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.idle_timer_start_webhook_url, "http://example/hook?a=%20b")
         self.assertIsNone(config.idle_timer_stop_webhook_url)
         self.assertEqual(config.webhook_method, "PUT")
+
+    def test_invalid_webhook_method_rejected(self):
+        with self.assertRaises(ValueError):
+            Config(webhook_method="POTS")
 
 
 if __name__ == "__main__":
