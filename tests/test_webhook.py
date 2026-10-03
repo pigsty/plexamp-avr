@@ -35,20 +35,21 @@ class WebhookClientTests(unittest.TestCase):
         self.server.server_close()
 
     def test_posts_json_payloads(self):
-        client = WebhookClient(f"{self.base}/start", f"{self.base}/stop", background=False)
+        client = WebhookClient(f"{self.base}/start", f"{self.base}/expired", background=False)
         client.idle_timer_started("paused", 900)
-        client.idle_timer_stopped("playing", "playback_resumed")
+        client.idle_timer_expired("paused", 900)
         (m1, p1, b1), (m2, p2, b2) = self.server.requests
-        self.assertEqual((m1, p1, m2, p2), ("POST", "/start", "POST", "/stop"))
-        start, stop = json.loads(b1), json.loads(b2)
+        self.assertEqual((m1, p1, m2, p2), ("POST", "/start", "POST", "/expired"))
+        start, expired = json.loads(b1), json.loads(b2)
         self.assertEqual(start["event"], "idle_timer_started")
         self.assertEqual(start["timeout_seconds"], 900)
-        self.assertEqual(stop["reason"], "playback_resumed")
+        self.assertEqual(expired["event"], "idle_timer_expired")
+        self.assertEqual(expired["state"], "paused")
 
     def test_get_method_sends_no_body(self):
         client = WebhookClient(f"{self.base}/start", None, method="get", background=False)
         client.idle_timer_started("stopped", 60)
-        client.idle_timer_stopped("playing", "expired")
+        client.idle_timer_expired("stopped", 60)
         self.assertEqual(self.server.requests, [("GET", "/start", b"")])
 
     def test_failures_are_swallowed(self):
@@ -56,14 +57,14 @@ class WebhookClientTests(unittest.TestCase):
         client.idle_timer_started("stopped", 60)
 
     def test_background_delivery_preserves_order(self):
-        client = WebhookClient(f"{self.base}/start", f"{self.base}/stop")
+        client = WebhookClient(f"{self.base}/start", f"{self.base}/expired")
         client.idle_timer_started("paused", 900)
-        client.idle_timer_stopped("playing", "playback_resumed")
+        client.idle_timer_expired("paused", 900)
         for _ in range(100):
             if len(self.server.requests) == 2:
                 break
             threading.Event().wait(0.05)
-        self.assertEqual([path for _, path, _ in self.server.requests], ["/start", "/stop"])
+        self.assertEqual([path for _, path, _ in self.server.requests], ["/start", "/expired"])
 
 
 class ConfigTests(unittest.TestCase):
@@ -72,13 +73,13 @@ class ConfigTests(unittest.TestCase):
             handle.write(
                 "[plexamp-avr]\n"
                 "idle_timer_start_webhook_url = http://example/hook?a=%20b\n"
-                "idle_timer_stop_webhook_url =\n"
+                "idle_timer_expired_webhook_url =\n"
                 "webhook_method = put\n"
             )
         self.addCleanup(os.unlink, handle.name)
         config = Config.from_file(handle.name)
         self.assertEqual(config.idle_timer_start_webhook_url, "http://example/hook?a=%20b")
-        self.assertIsNone(config.idle_timer_stop_webhook_url)
+        self.assertIsNone(config.idle_timer_expired_webhook_url)
         self.assertEqual(config.webhook_method, "PUT")
 
     def test_invalid_webhook_method_rejected(self):

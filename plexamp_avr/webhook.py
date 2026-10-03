@@ -14,13 +14,13 @@ class WebhookClient:
     def __init__(
         self,
         start_url: str | None = None,
-        stop_url: str | None = None,
+        expired_url: str | None = None,
         method: str = "POST",
         timeout: float = 5.0,
         background: bool = True,
     ):
         self.start_url = start_url or None
-        self.stop_url = stop_url or None
+        self.expired_url = expired_url or None
         self.method = method.upper()
         self.timeout = timeout
         self.background = background
@@ -34,11 +34,11 @@ class WebhookClient:
             "timeout_seconds": timeout_seconds,
         })
 
-    def idle_timer_stopped(self, state: str, reason: str) -> None:
-        self._send(self.stop_url, {
-            "event": "idle_timer_stopped",
+    def idle_timer_expired(self, state: str, timeout_seconds: int) -> None:
+        self._send(self.expired_url, {
+            "event": "idle_timer_expired",
             "state": state,
-            "reason": reason,
+            "timeout_seconds": timeout_seconds,
         })
 
     def _send(self, url: str | None, payload: dict) -> None:

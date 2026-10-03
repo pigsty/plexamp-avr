@@ -9,8 +9,9 @@ off_timer_seconds = 900
 preset_volume = 60
 power_on_delay_seconds = 5.0
 request_timeout_seconds = 5.0
-# Optional webhooks called when the idle (standby) timer starts and stops.
+# Optional webhooks called when the idle (standby) timer starts and when it expires.
+# Resuming playback before the timer expires does not call any webhook.
 # Leave empty to disable. The payload is JSON (omitted for GET).
 idle_timer_start_webhook_url =
-idle_timer_stop_webhook_url =
+idle_timer_expired_webhook_url =
 webhook_method = POST

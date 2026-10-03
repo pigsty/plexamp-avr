@@ -26,14 +26,14 @@ The installer uses only Python's standard library. Configure `plexamp_host`, `pl
 
 ### Idle timer webhooks
 
-Set `idle_timer_start_webhook_url` and/or `idle_timer_stop_webhook_url` to have the service call an external URL when the idle timer starts and stops. `webhook_method` selects the HTTP method (`GET`, `POST`, `PUT` or `PATCH`; default `POST`). Calls are made in the background, use `request_timeout_seconds`, and failures are only logged. For non-`GET` methods a JSON body is sent:
+Set `idle_timer_start_webhook_url` and/or `idle_timer_expired_webhook_url` to have the service call an external URL when the idle timer starts and when it expires. `webhook_method` selects the HTTP method (`GET`, `POST`, `PUT` or `PATCH`; default `POST`). Calls are made in the background, use `request_timeout_seconds`, and failures are only logged. For non-`GET` methods a JSON body is sent:
 
 ```json
 {"event": "idle_timer_started", "state": "paused", "timeout_seconds": 900, "timestamp": 1760000000.0}
-{"event": "idle_timer_stopped", "state": "playing", "reason": "playback_resumed", "timestamp": 1760000000.0}
+{"event": "idle_timer_expired", "state": "paused", "timeout_seconds": 900, "timestamp": 1760000900.0}
 ```
 
-The stop `reason` is `playback_resumed` when playback starts again before the timer fires, or `expired` when the timer elapses.
+The expired webhook is called once the timer elapses, whether or not the AVR is actually put into standby. Resuming playback before then silently cancels the timer and does not call any webhook.
 
 ## Development
 

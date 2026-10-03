@@ -56,8 +56,7 @@ class AvrController:
 
         # 2. Transition: Transitioning TO Playing
         if current_state.is_playing:
-            if self.idle_start_time is not None:
-                self._stop_idle_timer(state_name, "playback_resumed")
+            self.idle_start_time = None
             if self.previous_state != state_name:
                 if not self.avr.is_on():
                     LOGGER.info("Playback started; powering AVR on")
@@ -87,7 +86,7 @@ class AvrController:
                 LOGGER.info("Idle timeout reached, but AVR is already off; no action taken")
             
             # Reset timer after firing so it only fires once per idle session
-            self._stop_idle_timer(state_name, "expired")
+            self._expire_idle_timer(state_name)
 
         # Record current state for the next step comparison
         self.previous_state = state_name
@@ -97,10 +96,10 @@ class AvrController:
         if self.webhooks is not None:
             self.webhooks.idle_timer_started(state_name, self.config.off_timer_seconds)
 
-    def _stop_idle_timer(self, state_name: str, reason: str) -> None:
+    def _expire_idle_timer(self, state_name: str) -> None:
         self.idle_start_time = None
         if self.webhooks is not None:
-            self.webhooks.idle_timer_stopped(state_name, reason)
+            self.webhooks.idle_timer_expired(state_name, self.config.off_timer_seconds)
 
     def run(self) -> None:
         while True:
@@ -114,7 +113,7 @@ def build_controller(config: Config) -> AvrController:
         config,
         webhooks=WebhookClient(
             config.idle_timer_start_webhook_url,
-            config.idle_timer_stop_webhook_url,
+            config.idle_timer_expired_webhook_url,
             config.webhook_method,
             config.request_timeout_seconds,
         ),
