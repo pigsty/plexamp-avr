@@ -123,6 +123,8 @@ class ApiTests(unittest.TestCase):
         self.assertIn("<title>Plexamp AVR</title>", page)
         for zone in ("Z1", "Z2", "Z3"):
             self.assertIn(f">{zone}</button>", page)
+        self.assertIn('id="playback-state"', page)
+        self.assertIn('id="idle-timer"', page)
         for path, content_type in (("/app.js", "text/javascript"), ("/style.css", "text/css")):
             self.assertIn(path.lstrip("/"), page)
             status, headers, body = self.request("GET", path, raw=True)
@@ -134,6 +136,8 @@ class ApiTests(unittest.TestCase):
         status, body = self.request("GET", "/api/status")
         self.assertEqual(status, 200)
         self.assertTrue(body["connected"])
+        self.assertEqual(body["playback"]["state"], "stopped")
+        self.assertGreater(body["playback"]["idle_remaining_seconds"], 0)
         self.assertEqual(sorted(body["zones"]), ["z1", "z2", "z3"])
         for zone in body["zones"].values():
             self.assertEqual(sorted(zone), ["input", "muted", "power", "volume"])
@@ -209,6 +213,8 @@ class ApiTests(unittest.TestCase):
         initial = client.receive()
         self.assertEqual(initial["type"], "status")
         self.assertTrue(initial["connected"])
+        self.assertEqual(initial["playback"]["state"], "stopped")
+        self.assertGreater(initial["playback"]["idle_remaining_seconds"], 0)
         self.assertEqual(sorted(initial["zones"]), ["z1", "z2", "z3"])
 
         # Changes made on the AVR itself (e.g. front panel) are pushed in realtime.

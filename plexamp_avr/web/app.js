@@ -78,6 +78,7 @@ function renderPlayback() {
     seconds.className = "idle-seconds";
     timer.replaceChildren("Idle timer ", seconds, "s remaining…");
   }
+  seconds.style.minWidth = `${Math.max(4, parseInt(seconds.style.minWidth, 10) || 0, String(remaining).length)}ch`;
   seconds.textContent = String(remaining);
 }
 
