@@ -30,9 +30,9 @@ h2 { font-size: 1.1rem; margin: 0; }
 .status::before { content: "●"; margin-right: 0.35rem; color: var(--bad); }
 .status.ok::before { color: var(--ok); }
 
-.tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem; margin-top: 1rem; }
+.tabs { display: grid; grid-template-columns: repeat(3, 1fr) 1.6fr; gap: 0.5rem; margin-top: 1rem; }
 
-button, select {
+button, select, input[type="text"], input[type="url"], textarea {
   font: inherit;
   color: inherit;
   min-height: 3rem;
@@ -62,6 +62,24 @@ input[type="range"] { width: 100%; accent-color: var(--accent); height: 2rem; }
 output { font-variant-numeric: tabular-nums; }
 
 .error { color: var(--bad); text-align: center; }
+.muted { color: var(--muted); text-align: center; }
+
+.form label { margin-top: 0.75rem; }
+.form input[type="text"], .form input[type="url"], .form textarea {
+  display: block; width: 100%; margin-top: 0.5rem; padding: 0.75rem; background: var(--bg);
+}
+.form textarea { font-family: ui-monospace, monospace; resize: vertical; }
+.form .check { display: flex; align-items: center; gap: 0.5rem; color: var(--text); }
+.form .check input { width: 1.25rem; height: 1.25rem; accent-color: var(--accent); }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+.actions { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-top: 1rem; }
+.primary { background: var(--accent); border-color: var(--accent); color: #111; font-weight: 600; }
+
+.webhooks { list-style: none; margin: 0; padding: 0; }
+.webhooks li { background: var(--card); border-radius: 1rem; padding: 1rem; margin-top: 1rem; }
+.webhooks li.disabled .summary { opacity: 0.5; }
+.webhooks .summary { margin: 0.25rem 0 0; color: var(--muted); overflow-wrap: anywhere; font-size: 0.9rem; }
+.webhooks .actions { grid-template-columns: repeat(3, 1fr); }
 
 @media (min-width: 48rem) {
   .bar { padding-top: 2rem; }

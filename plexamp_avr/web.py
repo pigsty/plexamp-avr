@@ -15,6 +15,7 @@ from typing import Any, Iterable
 from urllib.parse import urlsplit
 
 from .denon import DenonClient, build_zone_command, normalize_zone
+from .webhooks import WebhookStore
 
 LOGGER = logging.getLogger(__name__)
 
@@ -27,11 +28,13 @@ STATIC_FILES = {
 # Request body field used by each zone action.
 ACTIONS = {"power": "power", "input": "input", "volume": "volume", "mute": "muted"}
 MAX_BODY_BYTES = 4096
+MAX_WEBHOOK_BODY_BYTES = 65536
 MAX_FRAME_BYTES = 65536
 WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 WS_PING_SECONDS = 25.0
 _ZONE_PATH = re.compile(r"/api/zones/([^/]+)")
 _ACTION_PATH = re.compile(r"/api/zones/([^/]+)/([^/]+)")
+_WEBHOOK_PATH = re.compile(r"/api/webhooks/([0-9a-f]{1,64})")
 _CLOSED = None
 
 
@@ -49,8 +52,16 @@ def _offer(target: queue.Queue, item: Any) -> None:
 
 
 class WebServer:
-    def __init__(self, avr: DenonClient, host: str, port: int, inputs: Iterable[str] = ()):
+    def __init__(
+        self,
+        avr: DenonClient,
+        host: str,
+        port: int,
+        inputs: Iterable[str] = (),
+        webhooks: WebhookStore | None = None,
+    ):
         self.avr = avr
+        self.webhooks = webhooks
         self.inputs = list(dict.fromkeys(inputs))
         self._clients: set[queue.Queue] = set()
         self._clients_lock = threading.Lock()
@@ -149,6 +160,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             self._json(200, {"zone": zone, "connected": snapshot["connected"], **snapshot["zones"][zone]})
         elif _ACTION_PATH.fullmatch(path):
             self._error(405, "use POST", {"Allow": "POST"})
+        elif path.startswith("/api/webhooks"):
+            self._webhooks(path)
         elif path in STATIC_FILES:
             name, content_type = STATIC_FILES[path]
             self._send(200, self.app._static[name], content_type)
@@ -157,6 +170,9 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urlsplit(self.path).path
+        if path.startswith("/api/webhooks"):
+            self._webhooks(path)
+            return
         match = _ACTION_PATH.fullmatch(path)
         if match is None or match[2] not in ACTIONS:
             self._discard_body()
@@ -184,6 +200,72 @@ class RequestHandler(BaseHTTPRequestHandler):
             return
         self._json(202, {"zone": zone, "command": command})
 
+    def do_PUT(self) -> None:
+        self._webhooks(urlsplit(self.path).path)
+
+    def do_DELETE(self) -> None:
+        self._webhooks(urlsplit(self.path).path)
+
+    def _webhooks(self, path: str) -> None:
+        """Handle the webhook config API (GET/POST /api/webhooks, GET/PUT/DELETE /api/webhooks/{id})."""
+        store = self.app.webhooks
+        match = _WEBHOOK_PATH.fullmatch(path)
+        if store is None or (path != "/api/webhooks" and match is None):
+            self._discard_body()
+            self._error(404, "not found")
+            return
+        allowed = "GET, POST" if match is None else "GET, PUT, DELETE"
+        method = "GET" if self.command == "HEAD" else self.command
+        if method not in allowed.split(", "):
+            self._discard_body()
+            self._error(405, f"use {allowed}", {"Allow": allowed})
+            return
+        if match is None and method == "GET":
+            self._json(200, {"webhooks": store.list()})
+            return
+        if match is not None and method in {"GET", "DELETE"}:
+            self._discard_body()
+            webhook_id = match[1]
+            if method == "GET":
+                webhook = store.get(webhook_id)
+                if webhook is None:
+                    self._error(404, "unknown webhook")
+                else:
+                    self._json(200, webhook)
+                return
+            try:
+                deleted = store.delete(webhook_id)
+            except OSError as err:
+                LOGGER.error("Could not save webhooks: %s", err)
+                self._error(500, "could not save webhooks")
+                return
+            if not deleted:
+                self._error(404, "unknown webhook")
+                return
+            LOGGER.info("Deleted webhook %s", webhook_id)
+            self._json(200, {"deleted": webhook_id})
+            return
+        body = self._read_json(MAX_WEBHOOK_BODY_BYTES)
+        if body is _CLOSED:
+            return
+        try:
+            if match is None:
+                webhook = store.create(body)
+            else:
+                webhook = store.update(match[1], body)
+        except (KeyError, ValueError) as err:
+            self._error(400, str(err))
+            return
+        except OSError as err:
+            LOGGER.error("Could not save webhooks: %s", err)
+            self._error(500, "could not save webhooks")
+            return
+        if webhook is None:
+            self._error(404, "unknown webhook")
+            return
+        LOGGER.info("%s webhook %s (%s)", "Created" if match is None else "Updated", webhook["id"], webhook["name"])
+        self._json(201 if match is None else 200, webhook)
+
     def _discard_body(self) -> None:
         try:
             length = int(self.headers.get("Content-Length", "0"))
@@ -194,7 +276,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         else:
             self.close_connection = True
 
-    def _read_json(self) -> Any:
+    def _read_json(self, max_bytes: int = MAX_BODY_BYTES) -> Any:
         """Read a JSON request body; sends an error and returns None on failure."""
         try:
             length = int(self.headers.get("Content-Length", ""))
@@ -202,7 +284,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.close_connection = True
             self._error(411, "Content-Length required")
             return _CLOSED
-        if length < 0 or length > MAX_BODY_BYTES:
+        if length < 0 or length > max_bytes:
             self.close_connection = True
             self._error(413, "request body too large")
             return _CLOSED

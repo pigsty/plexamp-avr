@@ -24,6 +24,7 @@ docker run -d \
   --network host \
   --restart unless-stopped \
   -v /etc/plexamp-avr.conf:/etc/plexamp-avr.conf:ro \
+  -v "$PWD/data":/data \
   plexamp-avr
 ```
 
@@ -33,11 +34,45 @@ Web UI/API settings: `web_enabled` (default `true`), `web_host` (default `0.0.0.
 `web_port` (default `8080`) and `avr_inputs`, a comma-separated list of inputs
 offered in the web UI (defaults to common Denon sources).
 
+Settings made in the web UI (currently webhooks) are saved in a config store
+directory, `data_dir` (default `/data`), as `webhooks.json`. The Docker image
+declares `/data` as a volume; mount a local directory there (as above, or
+`./data` in `docker-compose.yml`) to keep webhooks across container re-creation
+and to back them up or edit them on the host.
+
 ## Web UI
 
 Open `http://<host>:8080/` on a phone or desktop. Tabs Z1, Z2 and Z3 select the
 zone; each zone has power, input, volume (slider and −/+) and mute controls.
 State updates arrive in realtime over a WebSocket.
+
+The **Webhooks** tab lists the configured webhooks and lets you add, edit,
+**duplicate** (opens a pre-filled copy, handy for webhooks with similar URLs)
+and delete them.
+
+## Webhooks
+
+Each webhook maps an AVR event to an HTTP call:
+
+- **Zone**: `z1`, `z2` or `z3`.
+- **Event** and **value**: `power` (`on`/`off`), `mute` (`on`/`off`) or
+  `input` (a Denon source name such as `CD`, or empty for any input change).
+- **Method**: `GET`, `PUT` or `POST`, with an absolute `http://` or `https://`
+  **URL** and an optional **body** (sent for `PUT`/`POST` only, as
+  `application/json` when it is valid JSON, otherwise `text/plain`).
+- **Enabled**: disabled webhooks are kept but not called.
+
+Webhooks fire when the AVR reports a change, whether it was made through this
+service, the web UI or on the AVR itself (e.g. `Z1 power off`, `Z2 input CD`).
+The state learned when first connecting to the AVR does not trigger webhooks.
+Calls are made in the background, one at a time, using `request_timeout_seconds`.
+Each call is logged at info level with its response code, for example:
+
+```
+INFO Webhook 'Lights off' (Z1 power off): POST http://192.168.1.5/api/scene -> 200
+```
+
+Connection failures are logged as warnings.
 
 ## API
 
@@ -55,6 +90,11 @@ JSON with `Content-Type: application/json`.
 | `POST` | `/api/zones/{zone}/input` | `{"input": "CD"}` (Denon source name; `SOURCE` follows the main zone in Z2/Z3) |
 | `POST` | `/api/zones/{zone}/volume` | `{"volume": 45.5}` (0–98, half steps on Z1, whole steps on Z2/Z3) or `{"volume": "up"}` / `{"volume": "down"}` |
 | `POST` | `/api/zones/{zone}/mute` | `{"muted": true}` or `{"muted": false}` |
+| `GET` | `/api/webhooks` | `{"webhooks": [...]}` |
+| `POST` | `/api/webhooks` | Create a webhook (`201`) |
+| `GET` | `/api/webhooks/{id}` | A single webhook |
+| `PUT` | `/api/webhooks/{id}` | Replace a webhook |
+| `DELETE` | `/api/webhooks/{id}` | Delete a webhook |
 | `GET` | `/api/ws` | WebSocket status stream |
 
 Status shape (`volume` uses Denon's 0–98 scale, where 80 is 0 dB; fields are
@@ -80,11 +120,23 @@ curl -X POST -H 'Content-Type: application/json' -d '{"power": "on"}' http://loc
 # {"zone": "z2", "command": "Z2ON"}
 ```
 
+Webhook shape (`name`, `enabled` and `body` are optional when creating):
+
+```json
+{"id": "6b977e6c58cf4d0d85782cc1b26a4bf4", "name": "Z2 CD", "enabled": true, "zone": "z2",
+ "event": "input", "value": "CD", "method": "POST", "url": "http://192.168.1.5/hook", "body": "{\"on\": true}"}
+```
+
+Because webhooks make the service send HTTP requests to arbitrary URLs, only
+expose the API on a trusted network.
+
 The resulting state change is reported by the AVR and published on the
 WebSocket and in `/api/status`. Errors return JSON `{"error": "..."}` with
 `400` (invalid value), `404` (unknown zone or path), `405` (wrong method),
-`411` (missing `Content-Length`), `413` (body larger than 4 KiB), `415` (not
-JSON), `426` (`/api/ws` without a WebSocket upgrade) or `503` (AVR not connected).
+`411` (missing `Content-Length`), `413` (body larger than 4 KiB, 64 KiB for
+webhooks), `415` (not JSON), `426` (`/api/ws` without a WebSocket upgrade),
+`500` (webhooks could not be saved to the config store) or `503` (AVR not
+connected).
 
 ### WebSocket
 
@@ -110,7 +162,8 @@ The Docker end-to-end tests run the image's default entrypoint against local
 mock Plexamp HTTP and Denon AVR TCP servers. They verify playback powers on the
 AVR, selects the configured input and volume, and idle playback triggers standby;
 that the telnet connection is persistent; the HTTP API commands for all zones;
-WebSocket status updates; and that the website loads.
+WebSocket status updates; webhooks saved to a mounted config store and called on
+AVR events; and that the website loads.
 Run it on Linux with Docker available (the test uses host networking):
 
 ```sh

@@ -180,6 +180,27 @@ class MockAvr(socketserver.ThreadingTCPServer):
         return [f"{prefixes[key]}{value}"]
 
 
+class WebhookReceiverHandler(BaseHTTPRequestHandler):
+    def _handle(self):
+        length = int(self.headers.get("Content-Length", "0") or 0)
+        self.server.requests.put((self.command, self.path, self.rfile.read(length)))
+        self.send_response(204 if self.path.startswith("/ok") else 500)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    do_GET = do_PUT = do_POST = _handle
+
+    def log_message(self, format, *args):
+        pass
+
+
+def webhook_receiver():
+    """HTTP server recording webhook calls; paths starting with /ok answer 204, others 500."""
+    server = HTTPServer(("127.0.0.1", 0), WebhookReceiverHandler)
+    server.requests = queue.Queue()
+    return server
+
+
 def free_port():
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
@@ -272,14 +293,19 @@ def serve(server):
     return cleanup
 
 
-def run_container(config_path):
-    """Start the image's default entrypoint with the given config; returns the container name."""
+def run_container(config_path, data_dir=None):
+    """Start the image's default entrypoint with the given config; returns the container name.
+
+    ``data_dir`` is an optional host directory mounted as the /data config store.
+    """
     import uuid
 
     container = f"plexamp-avr-e2e-{uuid.uuid4().hex}"
+    mounts = ["--mount", f"type=bind,src={config_path},dst=/etc/plexamp-avr.conf,readonly"]
+    if data_dir is not None:
+        mounts += ["--mount", f"type=bind,src={data_dir},dst=/data"]
     docker(
-        "run", "--detach", "--name", container, "--network", "host",
-        "--mount", f"type=bind,src={config_path},dst=/etc/plexamp-avr.conf,readonly",
+        "run", "--detach", "--name", container, "--network", "host", *mounts,
         os.environ.get("PLEXAMP_AVR_TEST_IMAGE", "plexamp-avr:e2e"),
     )
     return container
