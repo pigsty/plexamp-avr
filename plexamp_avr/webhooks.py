@@ -75,6 +75,9 @@ def validate_webhook(data: Any) -> dict[str, Any]:
     enabled = data.get("enabled", True)
     if not isinstance(enabled, bool):
         raise ValueError("enabled must be true or false")
+    favorite = data.get("favorite", False)
+    if not isinstance(favorite, bool):
+        raise ValueError("favorite must be true or false")
     zone = normalize_zone(data["zone"]) if isinstance(data.get("zone"), str) else None
     if zone is None:
         raise ValueError(f"zone must be one of {', '.join(ZONES)}")
@@ -138,6 +141,7 @@ def validate_webhook(data: Any) -> dict[str, Any]:
     return {
         "name": name.strip(),
         "enabled": enabled,
+        "favorite": favorite,
         "zone": zone,
         "event": event,
         "value": value,
@@ -331,6 +335,14 @@ class WebhookDispatcher:
                 self._queue.put_nowait((webhook, describe_event(zone, event, value)))
             except queue.Full:
                 LOGGER.warning("Webhook queue full; dropping webhook %r", webhook["name"] or webhook["id"])
+
+    def trigger_manual(self, webhook: dict[str, Any]) -> bool:
+        """Queue a manual call, independently of automatic event matching."""
+        try:
+            self._queue.put_nowait((webhook, "manual"))
+        except queue.Full:
+            return False
+        return True
 
     def _run(self) -> None:
         while True:

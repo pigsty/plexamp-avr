@@ -41,6 +41,7 @@ WS_PING_SECONDS = 25.0
 _ZONE_PATH = re.compile(r"/api/zones/([^/]+)")
 _ACTION_PATH = re.compile(r"/api/zones/([^/]+)/([^/]+)")
 _WEBHOOK_PATH = re.compile(r"/api/webhooks/([0-9a-f]{1,64})")
+_WEBHOOK_TRIGGER_PATH = re.compile(r"/api/webhooks/([0-9a-f]{1,64})/trigger")
 _CLOSED = None
 
 
@@ -68,6 +69,7 @@ class WebServer:
         input_aliases: dict[str, str] | None = None,
         command_listener: Callable[[str, str, str], None] | None = None,
         controller: AvrController | None = None,
+        webhook_trigger: Callable[[dict[str, Any]], bool] | None = None,
     ):
         self.avr = avr
         self.webhooks = webhooks
@@ -75,6 +77,7 @@ class WebServer:
         self.input_aliases = dict(input_aliases or {})
         self.command_listener = command_listener
         self.controller = controller
+        self.webhook_trigger = webhook_trigger
         self._clients: set[queue.Queue] = set()
         self._clients_lock = threading.Lock()
         self._static = {
@@ -254,6 +257,9 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def _webhooks(self, path: str) -> None:
         """Handle the webhook config API (GET/POST /api/webhooks, GET/PUT/DELETE /api/webhooks/{id})."""
+        if match := _WEBHOOK_TRIGGER_PATH.fullmatch(path):
+            self._trigger_webhook(match[1])
+            return
         store = self.app.webhooks
         match = _WEBHOOK_PATH.fullmatch(path)
         if store is None or (path != "/api/webhooks" and match is None):
@@ -311,6 +317,34 @@ class RequestHandler(BaseHTTPRequestHandler):
             return
         LOGGER.info("%s webhook %s (%s)", "Created" if match is None else "Updated", webhook["id"], webhook["name"])
         self._json(201 if match is None else 200, webhook)
+
+    def _trigger_webhook(self, webhook_id: str) -> None:
+        store = self.app.webhooks
+        if store is None:
+            self._discard_body()
+            self._error(404, "not found")
+            return
+        if self.command != "POST":
+            self._discard_body()
+            self._error(405, "use POST", {"Allow": "POST"})
+            return
+        body = self._read_json()
+        if body is _CLOSED:
+            return
+        if not isinstance(body, dict) or body:
+            self._error(400, "expected an empty JSON object")
+            return
+        webhook = store.get(webhook_id)
+        if webhook is None:
+            self._error(404, "unknown webhook")
+            return
+        if self.app.webhook_trigger is None:
+            self._error(503, "webhook dispatcher is unavailable")
+            return
+        if not self.app.webhook_trigger(webhook):
+            self._error(503, "webhook queue is full")
+            return
+        self._json(202, {"triggered": webhook_id})
 
     def _discard_body(self) -> None:
         try:
