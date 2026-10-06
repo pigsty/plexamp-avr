@@ -38,6 +38,29 @@ function renderInputs(zone) {
   select.value = zone.input || "";
 }
 
+function renderInputShortcuts(zone, avrConnected) {
+  const shortcuts = Object.entries(state.inputAliases)
+    .filter(([inputName, alias]) => alias && inputName)
+    .slice(0, 4);
+  const container = $("input-shortcuts");
+  container.hidden = shortcuts.length === 0;
+  container.replaceChildren(...shortcuts.map(([inputName, alias]) => {
+    const button = document.createElement("button");
+    const label = document.createElement("span");
+    button.type = "button";
+    button.className = "input-shortcut";
+    button.dataset.input = inputName;
+    button.title = alias;
+    button.disabled = !avrConnected;
+    button.setAttribute("aria-label", alias);
+    button.setAttribute("aria-pressed", String(zone.input === inputName));
+    label.className = "input-shortcut-label";
+    label.textContent = alias;
+    button.append(label);
+    return button;
+  }));
+}
+
 function render() {
   const avrConnected = Boolean(state.socketOpen && state.status && state.status.connected);
   const connection = $("connection");
@@ -50,6 +73,7 @@ function render() {
   $("power").textContent = on ? "On" : zone.power === "off" ? "Off" : "–";
   $("power").setAttribute("aria-pressed", String(on));
   renderInputs(zone);
+  renderInputShortcuts(zone, avrConnected);
 
   const slider = $("volume");
   slider.step = state.zone === "z1" ? "0.5" : "1";
@@ -298,6 +322,10 @@ $("webhook-form").addEventListener("submit", saveWebhook);
 $("webhook-event").addEventListener("change", () => renderValueOptions());
 $("webhook-zone").addEventListener("change", () => renderValueOptions($("webhook-value").value));
 $("webhook-method").addEventListener("change", renderBodyField);
+$("input-shortcuts").addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-input]");
+  if (button && !button.disabled) send("input", { input: button.dataset.input });
+});
 $("power").addEventListener("click", () => send("power", { power: currentZone().power === "on" ? "off" : "on" }));
 $("input").addEventListener("change", (event) => {
   if (event.target.value) send("input", { input: event.target.value });

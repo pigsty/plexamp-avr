@@ -230,12 +230,6 @@ class ApiTests(unittest.TestCase):
 
     def test_crud(self):
         self.assertEqual(self.request("GET", "/api/webhooks"), (200, {"webhooks": []}))
-
-    def test_inputs_api_includes_aliases_without_replacing_input_names(self):
-        self.assertEqual(
-            self.request("GET", "/api/inputs"),
-            (200, {"inputs": ["MPLAY", "BD"], "aliases": {"MPLAY": "Apple TV"}}),
-        )
         status, created = self.request("POST", "/api/webhooks", hook())
         self.assertEqual(status, 201)
         path = f"/api/webhooks/{created['id']}"
@@ -249,6 +243,12 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.request("DELETE", path), (200, {"deleted": created["id"]}))
         self.assertEqual(self.request("GET", path)[0], 404)
         self.assertEqual(self.request("GET", "/api/webhooks"), (200, {"webhooks": []}))
+
+    def test_inputs_api_includes_aliases_without_replacing_input_names(self):
+        self.assertEqual(
+            self.request("GET", "/api/inputs"),
+            (200, {"inputs": ["MPLAY", "BD"], "aliases": {"MPLAY": "Apple TV"}}),
+        )
 
     def test_serves_pwa_install_assets(self):
         for path, expected_type in (

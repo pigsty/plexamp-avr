@@ -52,6 +52,29 @@ button:disabled, select:disabled, input:disabled { opacity: 0.5; cursor: not-all
 label { display: block; color: var(--muted); }
 select { width: 100%; margin-top: 0.5rem; padding: 0 0.75rem; background: var(--bg); }
 
+.input-shortcuts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.5rem; margin-top: 0.75rem; }
+.input-shortcut {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  min-width: 0;
+  min-height: 3rem;
+  height: 3rem;
+  padding: 0.35rem;
+  background: var(--bg);
+  text-align: center;
+}
+.input-shortcut[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #111; font-weight: 600; }
+.input-shortcut-label {
+  display: -webkit-box;
+  max-width: 100%;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  line-height: 1.15;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
 .toggle { min-width: 6rem; padding: 0 1rem; background: var(--bg); }
 .toggle[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #111; font-weight: 600; }
 .wide { width: 100%; margin-top: 1rem; }
