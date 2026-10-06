@@ -33,8 +33,8 @@ class FakeAvr:
     def input_name(self):
         return self.current_input
 
-    def power_on_and_configure(self, input_name, volume, delay):
-        self.calls.append(("on", input_name, volume, delay))
+    def power_on_and_configure(self, input_name, delay):
+        self.calls.append(("on", input_name, delay))
         self.on = True
         self.current_input = input_name
 
@@ -48,17 +48,16 @@ class ServiceTests(unittest.TestCase):
         values = dict(
             avr_input="PLEX",
             off_timer_seconds=60,
-            preset_volume=-35.0,
             power_on_delay_seconds=4.0,
         )
         values.update(changes)
         return Config(**values)
 
-    def test_playback_powers_on_and_sets_preset(self):
+    def test_playback_powers_on_and_selects_input(self):
         avr = FakeAvr()
         controller = AvrController(FakePlexamp(["playing"]), avr, self.config(), FakeClock())
         controller.step()
-        self.assertEqual(avr.calls, [("on", "PLEX", -35.0, 4.0)])
+        self.assertEqual(avr.calls, [("on", "PLEX", 4.0)])
 
     def test_wrong_input_is_never_stopped(self):
         clock = FakeClock()

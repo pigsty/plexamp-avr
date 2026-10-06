@@ -28,7 +28,16 @@ docker run -d \
   plexamp-avr
 ```
 
-The installer uses only Python's standard library. Configure `plexamp_host`, `plexamp_port`, `avr_host`, `avr_input`, `off_timer_seconds`, and optionally `preset_volume`. Volume values are Denon values between 0 and 98; leave it empty to skip volume changes. The Plexamp defaults are `localhost:32500`.
+The installer uses only Python's standard library. Configure `plexamp_host`, `plexamp_port`, `avr_host`, `avr_input`, and `off_timer_seconds`. The Plexamp defaults are `localhost:32500`.
+
+The last volume reported by the AVR is remembered separately for each zone and
+input. After an input-selection or power-on command, the remembered volume is
+restored when the AVR reports the matching status, or after five seconds,
+whichever comes first. Inputs without a remembered volume are left unchanged.
+This applies to playback automation and API/web UI commands. A newer input,
+power-off or manual volume command cancels an outstanding restore.
+Volumes are saved as `volumes.json` in `data_dir` and survive service restarts.
+The old `preset_volume` setting is no longer used and can be removed.
 
 Web UI/API settings: `web_enabled` (default `true`), `web_host` (default `0.0.0.0`),
 `web_port` (default `8080`), `avr_inputs`, a comma-separated list of inputs
@@ -177,7 +186,7 @@ python3 -m unittest discover -s tests -v
 
 The Docker end-to-end tests run the image's default entrypoint against local
 mock Plexamp HTTP and Denon AVR TCP servers. They verify playback powers on the
-AVR, selects the configured input and volume, and idle playback triggers standby;
+AVR, selects the configured input and restores its remembered volume, and idle playback triggers standby;
 that the telnet connection is persistent; the HTTP API commands for all zones;
 WebSocket status updates; webhooks saved to a mounted config store and called on
 AVR events; and that the website loads.

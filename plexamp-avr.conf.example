@@ -5,8 +5,7 @@ avr_host = 192.168.1.100
 avr_port = 23
 avr_input = MEDIA PLAYER
 off_timer_seconds = 900
-# Leave empty to keep the AVR's current volume.
-preset_volume = 60
+# Volumes are remembered automatically for each zone/input.
 power_on_delay_seconds = 5.0
 request_timeout_seconds = 5.0
 # Web UI and HTTP API (no authentication; only expose on trusted networks).
@@ -17,6 +16,6 @@ web_port = 8080
 avr_inputs =
 # Optional UI labels; the AVR still receives the source name on the left.
 avr_input_aliases = MPLAY=Apple TV, BD=Blu-ray
-# Config store directory for settings made in the web UI (e.g. webhooks).
+# Config store directory for webhooks and remembered input volumes.
 # Mount a local volume here when running in Docker.
 data_dir = /data

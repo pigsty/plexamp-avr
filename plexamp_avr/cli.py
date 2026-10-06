@@ -23,7 +23,10 @@ def main() -> None:
     args = parser.parse_args()
     _configure_logging(args.debug)
     config = Config.from_file(args.config)
-    avr = DenonClient(config.avr_host, config.avr_port, config.request_timeout_seconds)
+    avr = DenonClient(
+        config.avr_host, config.avr_port, config.request_timeout_seconds,
+        data_dir=config.data_dir,
+    )
     webhooks = WebhookStore(config.data_dir)
     dispatcher = WebhookDispatcher(webhooks, config.request_timeout_seconds)
     dispatcher.start()
