@@ -225,6 +225,10 @@ class RequestHandler(BaseHTTPRequestHandler):
         if not (upgrade and connection and key):
             self._error(426, "WebSocket upgrade required", {"Upgrade": "websocket"})
             return
+        origin = self.headers.get("Origin")
+        if origin is not None and urlsplit(origin).netloc.lower() != self.headers.get("Host", "").lower():
+            self._error(403, "cross-origin WebSocket connections are not allowed")
+            return
         accept = base64.b64encode(hashlib.sha1((key + WS_GUID).encode()).digest()).decode()
         self.send_response(101, "Switching Protocols")
         self.send_header("Upgrade", "websocket")

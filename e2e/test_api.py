@@ -159,8 +159,13 @@ class ApiTests(unittest.TestCase):
                 self.assertIn("error", response)
         self.assertTrue(self.avr.commands.empty(), "invalid requests must not reach the AVR")
 
+    def test_websocket_rejects_cross_origin_connections(self):
+        client = WebSocketClient(HOST, self.port, origin="http://evil.example")
+        self.addCleanup(client.close)
+        self.assertIn("403", client.handshake.splitlines()[0])
+
     def test_websocket_streams_status_updates(self):
-        client = WebSocketClient(HOST, self.port)
+        client = WebSocketClient(HOST, self.port, origin=f"http://{HOST}:{self.port}")
         self.addCleanup(client.close)
         self.assertIn("101", client.handshake.splitlines()[0])
         initial = client.receive()

@@ -83,7 +83,8 @@ curl -X POST -H 'Content-Type: application/json' -d '{"power": "on"}' http://loc
 The resulting state change is reported by the AVR and published on the
 WebSocket and in `/api/status`. Errors return JSON `{"error": "..."}` with
 `400` (invalid value), `404` (unknown zone or path), `405` (wrong method),
-`415` (not JSON) or `503` (AVR not connected).
+`411` (missing `Content-Length`), `413` (body larger than 4 KiB), `415` (not
+JSON), `426` (`/api/ws` without a WebSocket upgrade) or `503` (AVR not connected).
 
 ### WebSocket
 
@@ -96,6 +97,8 @@ including changes made on the AVR itself or by another client:
 ```
 
 Messages sent by the client are ignored; the server sends periodic pings.
+Browser connections whose `Origin` does not match the `Host` header are rejected
+with `403`, so a reverse proxy must preserve the `Host` header.
 
 ## Development
 

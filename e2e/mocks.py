@@ -189,13 +189,15 @@ def free_port():
 class WebSocketClient:
     """Minimal RFC 6455 client for reading the status stream."""
 
-    def __init__(self, host, port, path="/api/ws", timeout=10):
+    def __init__(self, host, port, path="/api/ws", timeout=10, origin=None):
         self.sock = socket.create_connection((host, port), timeout)
         key = base64.b64encode(os.urandom(16)).decode()
         self.sock.sendall(
             (
                 f"GET {path} HTTP/1.1\r\nHost: {host}:{port}\r\nUpgrade: websocket\r\n"
-                f"Connection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n"
+                f"Connection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n"
+                + (f"Origin: {origin}\r\n" if origin else "")
+                + "\r\n"
             ).encode()
         )
         response = b""
