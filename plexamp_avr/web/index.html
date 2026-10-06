@@ -56,7 +56,8 @@
       <h2 id="webhook-form-title">New webhook</h2>
       <label for="webhook-name">Name</label>
       <input type="text" id="webhook-name" maxlength="100" placeholder="Optional">
-      <label class="check"><input type="checkbox" id="webhook-enabled" checked> Enabled</label>
+      <label class="check"><input type="checkbox" id="webhook-enabled" checked> Enabled (automatic calls)</label>
+      <label class="check"><input type="checkbox" id="webhook-favorite"> Favorite (show on main page)</label>
       <div class="grid">
         <div>
           <label for="webhook-zone">Zone</label>
@@ -107,6 +108,13 @@
         <span id="playback-state" role="status">Unknown</span>
       </div>
       <p id="idle-timer" class="idle-timer">Idle timer inactive</p>
+    </section>
+    <section id="favorite-webhooks-card" class="card" aria-labelledby="favorite-webhooks-title">
+      <h2 id="favorite-webhooks-title">Favorite webhooks</h2>
+      <div id="favorite-webhooks" class="favorite-webhooks"></div>
+      <p id="favorite-webhooks-empty" class="muted">Mark favorites in the Webhooks tab to trigger them here.</p>
+      <p id="favorite-webhooks-status" role="status" hidden></p>
+      <p id="favorite-webhooks-error" class="error" role="alert" hidden></p>
     </section>
   </footer>
   <script src="app.js"></script>

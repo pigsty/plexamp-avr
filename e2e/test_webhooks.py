@@ -110,6 +110,34 @@ class WebhookTests(unittest.TestCase):
             print_logs(container)
             raise
 
+    def test_favorite_survives_restart_and_can_be_triggered_manually(self):
+        container = self.start()
+        url = f"http://{HOST}:{self.receiver.server_address[1]}"
+        try:
+            status, favorite = self.request("POST", "/api/webhooks", {
+                "name": "Manual scene", "zone": "z3", "event": "power", "value": "on",
+                "enabled": False, "favorite": True, "method": "POST",
+                "url": f"{url}/ok/manual", "body": '{"scene": "relax"}',
+            })
+            self.assertEqual(status, 201)
+            docker("rm", "--force", container)
+            container = self.start()
+            self.assertEqual(self.request("GET", "/api/webhooks"), (200, {"webhooks": [favorite]}))
+            before = self.request("GET", "/api/status")[1]["zones"]
+            self.assertEqual(
+                self.request("POST", f"/api/webhooks/{favorite['id']}/trigger", {}),
+                (202, {"triggered": favorite["id"]}),
+            )
+            self.assertEqual(
+                self.receiver.requests.get(timeout=10),
+                ("POST", "/ok/manual", b'{"scene": "relax"}'),
+            )
+            self.assertEqual(self.request("GET", "/api/status")[1]["zones"], before)
+            self.assertTrue(self.receiver.requests.empty())
+        except Exception:
+            print_logs(container)
+            raise
+
 
 if __name__ == "__main__":
     unittest.main()

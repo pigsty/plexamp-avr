@@ -84,6 +84,7 @@ function renderPlayback() {
 
 function render() {
   renderPlayback();
+  renderFavoriteWebhooks();
   const avrConnected = Boolean(state.socketOpen && state.status && state.status.connected);
   const connection = $("connection");
   connection.textContent = !state.socketOpen ? "Server offline" : avrConnected ? "AVR connected" : "AVR disconnected";
@@ -119,6 +120,7 @@ function selectZone(zone) {
   $("zone-panel").setAttribute("aria-labelledby", `tab-${zone}`);
   showError("");
   render();
+  loadWebhooks();
 }
 
 function selectWebhooks() {
@@ -127,12 +129,13 @@ function selectWebhooks() {
   }
   $("zone-panel").hidden = true;
   $("webhooks-panel").hidden = false;
+  renderFavoriteWebhooks();
   loadWebhooks();
 }
 
 // Webhooks ------------------------------------------------------------------
 
-const webhooks = { list: [], editing: null };
+const webhooks = { list: [], editing: null, pending: new Set() };
 
 function showWebhookError(message) {
   $("webhook-error").textContent = message;
@@ -156,10 +159,51 @@ async function loadWebhooks() {
     const data = await webhookRequest("GET", "api/webhooks");
     webhooks.list = data.webhooks || [];
     showWebhookError("");
+    showFavoriteWebhookError("");
   } catch (error) {
-    showWebhookError(error.message === "Failed to fetch" ? "Network error" : error.message);
+    const message = error.message === "Failed to fetch" ? "Network error" : error.message;
+    showWebhookError(message);
+    showFavoriteWebhookError(message);
   }
   renderWebhooks();
+  renderFavoriteWebhooks();
+}
+
+function showFavoriteWebhookError(message) {
+  $("favorite-webhooks-error").textContent = message;
+  $("favorite-webhooks-error").hidden = !message;
+}
+
+function renderFavoriteWebhooks() {
+  $("favorite-webhooks-card").hidden = $("zone-panel").hidden;
+  const favorites = webhooks.list.filter((hook) => hook.favorite);
+  $("favorite-webhooks-empty").hidden = favorites.length > 0;
+  $("favorite-webhooks").replaceChildren(...favorites.map((hook) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = hook.name || `${hook.zone.toUpperCase()} ${hook.event} ${hook.value || "any"}`;
+    button.disabled = !state.socketOpen || webhooks.pending.has(hook.id);
+    button.addEventListener("click", () => triggerWebhook(hook));
+    return button;
+  }));
+}
+
+async function triggerWebhook(hook) {
+  if (webhooks.pending.has(hook.id)) return;
+  webhooks.pending.add(hook.id);
+  showFavoriteWebhookError("");
+  $("favorite-webhooks-status").hidden = true;
+  renderFavoriteWebhooks();
+  try {
+    await webhookRequest("POST", `api/webhooks/${encodeURIComponent(hook.id)}/trigger`, {});
+    $("favorite-webhooks-status").textContent = `${hook.name || "Webhook"} queued. See server logs for the result.`;
+    $("favorite-webhooks-status").hidden = false;
+  } catch (error) {
+    showFavoriteWebhookError(error.message === "Failed to fetch" ? "Network error" : error.message);
+  } finally {
+    webhooks.pending.delete(hook.id);
+    renderFavoriteWebhooks();
+  }
 }
 
 function describeWebhook(hook) {
@@ -171,7 +215,7 @@ function renderWebhooks() {
     const item = document.createElement("li");
     item.classList.toggle("disabled", !hook.enabled);
     const title = document.createElement("h2");
-    title.textContent = (hook.name || "Unnamed webhook") + (hook.enabled ? "" : " (disabled)");
+    title.textContent = (hook.favorite ? "★ " : "") + (hook.name || "Unnamed webhook") + (hook.enabled ? "" : " (disabled)");
     const summary = document.createElement("p");
     summary.className = "summary";
     summary.textContent = describeWebhook(hook);
@@ -222,6 +266,7 @@ function editWebhook(hook, duplicate) {
   $("webhook-form-title").textContent = !hook ? "New webhook" : duplicate ? "Duplicate webhook" : "Edit webhook";
   $("webhook-name").value = duplicate && source.name ? `${source.name} (copy)` : source.name;
   $("webhook-enabled").checked = source.enabled;
+  $("webhook-favorite").checked = Boolean(source.favorite);
   $("webhook-zone").value = source.zone;
   $("webhook-event").value = source.event;
   renderValueOptions(source.value);
@@ -259,6 +304,7 @@ async function saveWebhook(event) {
   const body = {
     name: $("webhook-name").value,
     enabled: $("webhook-enabled").checked,
+    favorite: $("webhook-favorite").checked,
     zone: $("webhook-zone").value,
     event: $("webhook-event").value,
     value: $("webhook-value").value,
@@ -319,6 +365,7 @@ function connect() {
     reconnectDelay = 1000;
     state.socketOpen = true;
     render();
+    loadWebhooks();
   });
   socket.addEventListener("message", (event) => {
     const message = JSON.parse(event.data);
