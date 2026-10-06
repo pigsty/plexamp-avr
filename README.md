@@ -59,6 +59,9 @@ it is preserved on later saves.
 Open `http://<host>:8080/` on a phone or desktop. Tabs Z1, Z2 and Z3 select the
 zone; each zone has power, input, volume (slider and −/+) and mute controls.
 State updates arrive in realtime over a WebSocket.
+The Plexamp tile at the bottom of every tab shows playback state and, while the
+standby timer is active, a live countdown such as “Idle timer 33s remaining…”.
+The countdown reserves space for its digits so updates do not shift the text.
 
 The **Webhooks** tab lists the configured webhooks and lets you add, edit,
 **duplicate** (opens a pre-filled copy, handy for webhooks with similar URLs)
@@ -108,7 +111,7 @@ JSON with `Content-Type: application/json`.
 
 | Method | Path | Description |
 | --- | --- | --- |
-| `GET` | `/api/status` | Connection status and state of all zones |
+| `GET` | `/api/status` | Connection status, state of all zones and Plexamp playback/idle timer |
 | `GET` | `/api/zones/{zone}` | State of a single zone |
 | `GET` | `/api/inputs` | Inputs offered by the web UI |
 | `POST` | `/api/zones/{zone}/power` | `{"power": "on"}` or `{"power": "off"}` |
@@ -128,6 +131,7 @@ Status shape (`volume` uses Denon's 0–98 scale, where 80 is 0 dB; fields are
 ```json
 {
   "connected": true,
+  "playback": {"state": "paused", "idle_remaining_seconds": 33.0},
   "zones": {
     "z1": {"power": "on", "input": "MPLAY", "volume": 45.5, "muted": false},
     "z2": {"power": "off", "input": "SOURCE", "volume": 30.0, "muted": false},
@@ -137,6 +141,10 @@ Status shape (`volume` uses Denon's 0–98 scale, where 80 is 0 dB; fields are
 ```
 
 `GET /api/zones/{zone}` returns `{"zone": "z1", "connected": true, "power": ..., "input": ..., "volume": ..., "muted": ...}`.
+`playback.state` is `unknown` until Plexamp reports a state or when polling fails.
+`idle_remaining_seconds` is `null` when no idle timer is active, otherwise the
+non-negative seconds remaining. Playback updates do not change the existing
+standby rules; a failed poll leaves the automation timer unchanged.
 
 Commands are sent to the AVR and acknowledged with `202 Accepted`:
 
@@ -171,10 +179,12 @@ status and then a message whenever the state or AVR connection changes,
 including changes made on the AVR itself or by another client:
 
 ```json
-{"type": "status", "connected": true, "zones": {"z1": {...}, "z2": {...}, "z3": {...}}}
+{"type": "status", "connected": true, "playback": {"state": "paused", "idle_remaining_seconds": 33.0}, "zones": {"z1": {...}, "z2": {...}, "z3": {...}}}
 ```
 
 Messages sent by the client are ignored; the server sends periodic pings.
+Playback transitions and idle timer start/cancellation/expiry also publish status
+messages. Clients can count down locally between messages without extra polling.
 Browser connections whose `Origin` does not match the `Host` header are rejected
 with `403`, so a reverse proxy must preserve the `Host` header.
 

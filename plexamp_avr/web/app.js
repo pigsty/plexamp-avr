@@ -1,7 +1,7 @@
 "use strict";
 
 const ZONE_NAMES = { z1: "Main zone", z2: "Zone 2", z3: "Zone 3" };
-const state = { zone: "z1", status: null, socketOpen: false, inputs: [], inputAliases: {}, draggingVolume: false };
+const state = { zone: "z1", status: null, socketOpen: false, inputs: [], inputAliases: {}, draggingVolume: false, idleDeadline: null };
 const $ = (id) => document.getElementById(id);
 
 function inputLabel(name) {
@@ -61,7 +61,29 @@ function renderInputShortcuts(zone, avrConnected) {
   }));
 }
 
+function renderPlayback() {
+  const playback = state.socketOpen && state.status ? state.status.playback : null;
+  const name = playback && playback.state || "unknown";
+  $("playback-state").textContent = !state.socketOpen ? "Offline" : name[0].toUpperCase() + name.slice(1);
+  const timer = $("idle-timer");
+  if (!playback || state.idleDeadline === null) {
+    timer.textContent = !state.socketOpen ? "Idle timer unavailable" : "Idle timer inactive";
+    return;
+  }
+  const remaining = Math.max(0, Math.ceil((state.idleDeadline - performance.now()) / 1000));
+  let seconds = $("idle-seconds");
+  if (!seconds) {
+    seconds = document.createElement("span");
+    seconds.id = "idle-seconds";
+    seconds.className = "idle-seconds";
+    timer.replaceChildren("Idle timer ", seconds, "s remaining…");
+  }
+  seconds.style.minWidth = `${Math.max(4, parseInt(seconds.style.minWidth, 10) || 0, String(remaining).length)}ch`;
+  seconds.textContent = String(remaining);
+}
+
 function render() {
+  renderPlayback();
   const avrConnected = Boolean(state.socketOpen && state.status && state.status.connected);
   const connection = $("connection");
   connection.textContent = !state.socketOpen ? "Server offline" : avrConnected ? "AVR connected" : "AVR disconnected";
@@ -302,11 +324,15 @@ function connect() {
     const message = JSON.parse(event.data);
     if (message.type === "status") {
       state.status = message;
+      const remaining = message.playback && message.playback.idle_remaining_seconds;
+      state.idleDeadline = Number.isFinite(remaining) ? performance.now() + Math.max(0, remaining) * 1000 : null;
       render();
     }
   });
   socket.addEventListener("close", () => {
     state.socketOpen = false;
+    state.status = null;
+    state.idleDeadline = null;
     render();
     setTimeout(connect, reconnectDelay);
     reconnectDelay = Math.min(reconnectDelay * 2, 15000);
@@ -353,6 +379,7 @@ fetch("api/inputs")
   .catch(() => {});
 
 render();
+setInterval(renderPlayback, 250);
 connect();
 
 if ("serviceWorker" in navigator) {

@@ -20,7 +20,7 @@ body {
   padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
 }
 
-.bar, .tabs, main { width: 100%; max-width: 32rem; margin: 0 auto; padding: 0 1rem; }
+.bar, .tabs, main, .playback-footer { width: 100%; max-width: 32rem; margin: 0 auto; padding: 0 1rem; }
 
 .bar { display: flex; align-items: center; justify-content: space-between; padding-top: 1rem; }
 h1 { font-size: 1.25rem; margin: 0; }
@@ -86,6 +86,10 @@ output { font-variant-numeric: tabular-nums; }
 
 .error { color: var(--bad); text-align: center; }
 .muted { color: var(--muted); text-align: center; }
+
+.playback-footer { padding-bottom: 1rem; }
+.idle-timer { color: var(--muted); margin: 0.5rem 0 0; min-height: 1.5em; }
+.idle-seconds { display: inline-block; min-width: 4ch; text-align: right; font-variant-numeric: tabular-nums; }
 
 .form label { margin-top: 0.75rem; }
 .form input[type="text"], .form input[type="url"], .form textarea {

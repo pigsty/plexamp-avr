@@ -108,6 +108,58 @@ class ServiceTests(unittest.TestCase):
         controller.step()  # unknown state at t=61 (ignored)
         self.assertEqual(avr.calls, [])
 
+    def test_playback_snapshot_counts_down_and_cancels_on_buffering(self):
+        clock = FakeClock()
+        controller = AvrController(FakePlexamp(["paused", "paused", "buffering"]), FakeAvr(), self.config(), clock)
+        self.assertEqual(controller.playback_snapshot(), {"state": "unknown", "idle_remaining_seconds": None})
+        updates = []
+        controller.add_listener(lambda: updates.append(controller.playback_snapshot()))
+        controller.step()
+        self.assertEqual(updates[-1], {"state": "paused", "idle_remaining_seconds": 60.0})
+        clock.value = 27.5
+        self.assertEqual(controller.playback_snapshot()["idle_remaining_seconds"], 32.5)
+        controller.step()
+        self.assertEqual(len(updates), 1, "unchanged polls must not restart the timer or broadcast")
+        controller.step()
+        self.assertEqual(updates[-1], {"state": "buffering", "idle_remaining_seconds": None})
+
+    def test_expired_timer_is_cleared_and_not_restarted(self):
+        for input_name in ("PLEX", "GAME"):
+            with self.subTest(input_name=input_name):
+                clock = FakeClock()
+                controller = AvrController(
+                    FakePlexamp(["stopped", "stopped", "stopped"]),
+                    FakeAvr(on=True, input_name=input_name), self.config(), clock,
+                )
+                controller.step()
+                clock.value = 61
+                self.assertEqual(controller.playback_snapshot()["idle_remaining_seconds"], 0)
+                controller.step()
+                self.assertEqual(controller.playback_snapshot(), {"state": "stopped", "idle_remaining_seconds": None})
+                controller.step()
+                self.assertIsNone(controller.playback_snapshot()["idle_remaining_seconds"])
+
+    def test_unknown_poll_reports_unknown_without_changing_automation_timer(self):
+        clock = FakeClock()
+        avr = FakeAvr(on=True, input_name="PLEX")
+        controller = AvrController(FakePlexamp(["paused", "unknown", "paused"]), avr, self.config(), clock)
+        controller.step()
+        clock.value = 61
+        controller.step()
+        self.assertEqual(controller.playback_snapshot(), {"state": "unknown", "idle_remaining_seconds": 0})
+        self.assertEqual(avr.calls, [])
+        controller.step()
+        self.assertIsNone(controller.playback_snapshot()["idle_remaining_seconds"])
+        self.assertEqual(avr.calls, [("standby",)])
+
+    def test_status_is_published_before_power_on_delay(self):
+        avr = FakeAvr()
+        controller = AvrController(FakePlexamp(["playing"]), avr, self.config())
+        snapshots = []
+        avr.power_on_and_configure = lambda *args: snapshots.append(controller.playback_snapshot())
+        controller.step()
+        self.assertEqual(snapshots, [{"state": "playing", "idle_remaining_seconds": None}])
+
 
 if __name__ == "__main__":
     unittest.main()
