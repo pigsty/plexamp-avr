@@ -16,6 +16,7 @@
     <button type="button" role="tab" id="tab-z1" data-zone="z1" aria-selected="true" aria-controls="zone-panel">Z1</button>
     <button type="button" role="tab" id="tab-z2" data-zone="z2" aria-selected="false" aria-controls="zone-panel">Z2</button>
     <button type="button" role="tab" id="tab-z3" data-zone="z3" aria-selected="false" aria-controls="zone-panel">Z3</button>
+    <button type="button" role="tab" id="tab-webhooks" data-view="webhooks" aria-selected="false" aria-controls="webhooks-panel">Webhooks</button>
   </nav>
   <main id="zone-panel" role="tabpanel" aria-labelledby="tab-z1">
     <section class="card row">
@@ -39,6 +40,57 @@
       <button type="button" id="mute" class="toggle wide" aria-pressed="false">Mute</button>
     </section>
     <p id="error" class="error" role="alert" hidden></p>
+  </main>
+  <main id="webhooks-panel" role="tabpanel" aria-labelledby="tab-webhooks" hidden>
+    <section class="card row">
+      <h2>Webhooks</h2>
+      <button type="button" id="webhook-add" class="toggle">Add</button>
+    </section>
+    <form id="webhook-form" class="card form" hidden>
+      <h2 id="webhook-form-title">New webhook</h2>
+      <label for="webhook-name">Name</label>
+      <input type="text" id="webhook-name" maxlength="100" placeholder="Optional">
+      <label class="check"><input type="checkbox" id="webhook-enabled" checked> Enabled</label>
+      <div class="grid">
+        <div>
+          <label for="webhook-zone">Zone</label>
+          <select id="webhook-zone">
+            <option value="z1">Z1</option>
+            <option value="z2">Z2</option>
+            <option value="z3">Z3</option>
+          </select>
+        </div>
+        <div>
+          <label for="webhook-event">Event</label>
+          <select id="webhook-event">
+            <option value="power">Power</option>
+            <option value="input">Input</option>
+            <option value="mute">Mute</option>
+          </select>
+        </div>
+      </div>
+      <label for="webhook-value">Value</label>
+      <select id="webhook-value"></select>
+      <label for="webhook-method">Method</label>
+      <select id="webhook-method">
+        <option>GET</option>
+        <option>PUT</option>
+        <option selected>POST</option>
+      </select>
+      <label for="webhook-url">URL</label>
+      <input type="url" id="webhook-url" required maxlength="2048" placeholder="http://example.local/hook">
+      <div id="webhook-body-field">
+        <label for="webhook-body">Body (optional)</label>
+        <textarea id="webhook-body" rows="4" maxlength="16384"></textarea>
+      </div>
+      <div class="actions">
+        <button type="button" id="webhook-cancel">Cancel</button>
+        <button type="submit" id="webhook-save" class="primary">Save</button>
+      </div>
+    </form>
+    <ul id="webhook-list" class="webhooks"></ul>
+    <p id="webhook-empty" class="muted" hidden>No webhooks configured.</p>
+    <p id="webhook-error" class="error" role="alert" hidden></p>
   </main>
   <script src="app.js"></script>
 </body>

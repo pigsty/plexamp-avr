@@ -25,6 +25,7 @@ class Config:
     web_host: str = "0.0.0.0"
     web_port: int = 8080
     avr_inputs: tuple[str, ...] = DEFAULT_INPUTS
+    data_dir: str = "/data"
 
     @classmethod
     def from_file(cls, path: str | Path) -> "Config":
@@ -50,4 +51,5 @@ class Config:
             web_host=values.get("web_host", cls.web_host),
             web_port=values.getint("web_port", cls.web_port),
             avr_inputs=inputs or DEFAULT_INPUTS,
+            data_dir=values.get("data_dir", "").strip() or cls.data_dir,
         )

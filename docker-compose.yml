@@ -8,3 +8,4 @@ services:
     network_mode: host
     volumes:
       - /etc/plexamp-avr.conf:/etc/plexamp-avr.conf:ro
+      - ./data:/data

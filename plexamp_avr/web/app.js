@@ -62,9 +62,168 @@ function selectZone(zone) {
   for (const tab of document.querySelectorAll('[role="tab"]')) {
     tab.setAttribute("aria-selected", String(tab.dataset.zone === zone));
   }
+  $("zone-panel").hidden = false;
+  $("webhooks-panel").hidden = true;
   $("zone-panel").setAttribute("aria-labelledby", `tab-${zone}`);
   showError("");
   render();
+}
+
+function selectWebhooks() {
+  for (const tab of document.querySelectorAll('[role="tab"]')) {
+    tab.setAttribute("aria-selected", String(tab.dataset.view === "webhooks"));
+  }
+  $("zone-panel").hidden = true;
+  $("webhooks-panel").hidden = false;
+  loadWebhooks();
+}
+
+// Webhooks ------------------------------------------------------------------
+
+const webhooks = { list: [], editing: null };
+
+function showWebhookError(message) {
+  $("webhook-error").textContent = message;
+  $("webhook-error").hidden = !message;
+}
+
+async function webhookRequest(method, path, body) {
+  const options = { method, headers: {} };
+  if (body !== undefined) {
+    options.headers["Content-Type"] = "application/json";
+    options.body = JSON.stringify(body);
+  }
+  const response = await fetch(path, options);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
+  return data;
+}
+
+async function loadWebhooks() {
+  try {
+    const data = await webhookRequest("GET", "api/webhooks");
+    webhooks.list = data.webhooks || [];
+    showWebhookError("");
+  } catch (error) {
+    showWebhookError(error.message === "Failed to fetch" ? "Network error" : error.message);
+  }
+  renderWebhooks();
+}
+
+function describeWebhook(hook) {
+  return `${hook.zone.toUpperCase()} ${hook.event} = ${hook.value || "any"} → ${hook.method} ${hook.url}`;
+}
+
+function renderWebhooks() {
+  const items = webhooks.list.map((hook) => {
+    const item = document.createElement("li");
+    item.classList.toggle("disabled", !hook.enabled);
+    const title = document.createElement("h2");
+    title.textContent = (hook.name || "Unnamed webhook") + (hook.enabled ? "" : " (disabled)");
+    const summary = document.createElement("p");
+    summary.className = "summary";
+    summary.textContent = describeWebhook(hook);
+    const actions = document.createElement("div");
+    actions.className = "actions";
+    for (const [label, handler] of [
+      ["Edit", () => editWebhook(hook, false)],
+      ["Duplicate", () => editWebhook(hook, true)],
+      ["Delete", () => deleteWebhook(hook)],
+    ]) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = label;
+      button.addEventListener("click", handler);
+      actions.append(button);
+    }
+    item.append(title, summary, actions);
+    return item;
+  });
+  $("webhook-list").replaceChildren(...items);
+  $("webhook-empty").hidden = webhooks.list.length > 0 || !$("webhook-form").hidden;
+}
+
+function renderValueOptions(selected) {
+  const event = $("webhook-event").value;
+  let options;
+  if (event === "input") {
+    const inputs = [...state.inputs];
+    if ($("webhook-zone").value !== "z1" && !inputs.includes("SOURCE")) inputs.unshift("SOURCE");
+    if (selected && !inputs.includes(selected)) inputs.push(selected);
+    options = [new Option("Any input", ""), ...inputs.map((name) => new Option(name, name))];
+  } else {
+    options = [new Option("On", "on"), new Option("Off", "off")];
+  }
+  $("webhook-value").replaceChildren(...options);
+  if (selected !== undefined && [...$("webhook-value").options].some((o) => o.value === selected)) {
+    $("webhook-value").value = selected;
+  }
+}
+
+function renderBodyField() {
+  $("webhook-body-field").hidden = $("webhook-method").value === "GET";
+}
+
+function editWebhook(hook, duplicate) {
+  const source = hook || { name: "", enabled: true, zone: "z1", event: "power", value: "on", method: "POST", url: "", body: "" };
+  webhooks.editing = hook && !duplicate ? hook.id : null;
+  $("webhook-form-title").textContent = !hook ? "New webhook" : duplicate ? "Duplicate webhook" : "Edit webhook";
+  $("webhook-name").value = duplicate && source.name ? `${source.name} (copy)` : source.name;
+  $("webhook-enabled").checked = source.enabled;
+  $("webhook-zone").value = source.zone;
+  $("webhook-event").value = source.event;
+  renderValueOptions(source.value);
+  $("webhook-method").value = source.method;
+  $("webhook-url").value = source.url;
+  $("webhook-body").value = source.body || "";
+  renderBodyField();
+  showWebhookError("");
+  $("webhook-form").hidden = false;
+  renderWebhooks();
+  $("webhook-form").scrollIntoView({ block: "start" });
+  $("webhook-url").focus({ preventScroll: true });
+}
+
+function closeWebhookForm() {
+  webhooks.editing = null;
+  $("webhook-form").hidden = true;
+  renderWebhooks();
+}
+
+async function saveWebhook(event) {
+  event.preventDefault();
+  const body = {
+    name: $("webhook-name").value,
+    enabled: $("webhook-enabled").checked,
+    zone: $("webhook-zone").value,
+    event: $("webhook-event").value,
+    value: $("webhook-value").value,
+    method: $("webhook-method").value,
+    url: $("webhook-url").value,
+    body: $("webhook-body").value,
+  };
+  try {
+    if (webhooks.editing) {
+      await webhookRequest("PUT", `api/webhooks/${encodeURIComponent(webhooks.editing)}`, body);
+    } else {
+      await webhookRequest("POST", "api/webhooks", body);
+    }
+    closeWebhookForm();
+    await loadWebhooks();
+  } catch (error) {
+    showWebhookError(error.message === "Failed to fetch" ? "Network error" : error.message);
+  }
+}
+
+async function deleteWebhook(hook) {
+  if (!window.confirm(`Delete webhook "${hook.name || hook.url}"?`)) return;
+  try {
+    await webhookRequest("DELETE", `api/webhooks/${encodeURIComponent(hook.id)}`);
+    if (webhooks.editing === hook.id) closeWebhookForm();
+    await loadWebhooks();
+  } catch (error) {
+    showWebhookError(error.message === "Failed to fetch" ? "Network error" : error.message);
+  }
 }
 
 async function send(action, body) {
@@ -112,8 +271,14 @@ function connect() {
 }
 
 for (const tab of document.querySelectorAll('[role="tab"]')) {
-  tab.addEventListener("click", () => selectZone(tab.dataset.zone));
+  tab.addEventListener("click", () => (tab.dataset.view === "webhooks" ? selectWebhooks() : selectZone(tab.dataset.zone)));
 }
+$("webhook-add").addEventListener("click", () => editWebhook(null, false));
+$("webhook-cancel").addEventListener("click", closeWebhookForm);
+$("webhook-form").addEventListener("submit", saveWebhook);
+$("webhook-event").addEventListener("change", () => renderValueOptions());
+$("webhook-zone").addEventListener("change", () => renderValueOptions($("webhook-value").value));
+$("webhook-method").addEventListener("change", renderBodyField);
 $("power").addEventListener("click", () => send("power", { power: currentZone().power === "on" ? "off" : "on" }));
 $("input").addEventListener("change", (event) => {
   if (event.target.value) send("input", { input: event.target.value });
