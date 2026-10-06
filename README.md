@@ -29,3 +29,16 @@ The installer uses only Python's standard library. Configure `plexamp_host`, `pl
 ```sh
 python3 -m unittest discover -s tests -v
 ```
+
+The Docker end-to-end test runs the image's default entrypoint against local
+mock Plexamp HTTP and Denon AVR TCP servers. It verifies playback powers on the
+AVR, selects the configured input and volume, and idle playback triggers standby.
+Run it on Linux with Docker available (the test uses host networking):
+
+```sh
+docker build -t plexamp-avr:e2e .
+python3 -m unittest discover -s e2e -v
+```
+
+GitHub Actions runs both the unit tests and the Docker end-to-end test on pushes
+and pull requests.
