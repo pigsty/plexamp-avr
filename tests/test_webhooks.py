@@ -242,6 +242,25 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.request("GET", path)[0], 404)
         self.assertEqual(self.request("GET", "/api/webhooks"), (200, {"webhooks": []}))
 
+    def test_serves_pwa_install_assets(self):
+        for path, expected_type in (
+            ("/manifest.webmanifest", "application/manifest+json"),
+            ("/sw.js", "text/javascript"),
+            ("/apple-touch-icon.png", "image/png"),
+            ("/icon-192.png", "image/png"),
+            ("/icon-512.png", "image/png"),
+        ):
+            with self.subTest(path=path), urlopen(f"http://127.0.0.1:{self.server.port}{path}", timeout=5) as response:
+                self.assertEqual(response.status, 200)
+                self.assertTrue(response.headers["Content-Type"].startswith(expected_type))
+                self.assertTrue(response.read())
+
+        with urlopen(f"http://127.0.0.1:{self.server.port}/", timeout=5) as response:
+            page = response.read().decode()
+        self.assertIn('name="apple-mobile-web-app-capable" content="yes"', page)
+        self.assertIn('rel="apple-touch-icon" href="/apple-touch-icon.png"', page)
+        self.assertIn('rel="manifest" href="/manifest.webmanifest"', page)
+
     def test_errors(self):
         cases = (
             ("POST", "/api/webhooks", hook(url="ftp://x"), "application/json", 400),

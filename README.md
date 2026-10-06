@@ -52,6 +52,12 @@ The **Webhooks** tab lists the configured webhooks and lets you add, edit,
 **duplicate** (opens a pre-filled copy, handy for webhooks with similar URLs)
 and delete them.
 
+On iPhone or iPad, open the web UI in Safari, tap **Share**, then **Add to Home
+Screen**. The app opens without Safari chrome and has a dedicated home-screen
+icon. Service-worker caching requires a secure context; use HTTPS for offline
+app-shell support. On plain HTTP, the controls still require a live connection
+to the server and AVR.
+
 ## Webhooks
 
 Each webhook maps an AVR event to an HTTP call:
