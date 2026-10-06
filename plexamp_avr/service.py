@@ -53,7 +53,6 @@ class AvrController:
                     LOGGER.info("Playback started; powering AVR on")
                     self.avr.power_on_and_configure(
                         self.config.avr_input,
-                        self.config.preset_volume,
                         self.config.power_on_delay_seconds,
                     )
                 else:
@@ -90,6 +89,9 @@ class AvrController:
 def build_controller(config: Config, avr: DenonClient | None = None) -> AvrController:
     return AvrController(
         PlexampClient(config.plexamp_host, config.plexamp_port, config.request_timeout_seconds),
-        avr or DenonClient(config.avr_host, config.avr_port, config.request_timeout_seconds),
+        avr or DenonClient(
+            config.avr_host, config.avr_port, config.request_timeout_seconds,
+            data_dir=config.data_dir,
+        ),
         config,
     )

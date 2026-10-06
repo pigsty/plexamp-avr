@@ -25,6 +25,14 @@ class ConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "INPUT=Alias"):
             self.read_config("MPLAY")
 
+    def test_legacy_preset_volume_is_ignored(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        path = Path(temporary.name) / "plexamp-avr.conf"
+        path.write_text("[plexamp-avr]\npreset_volume=obsolete\n")
+        config = Config.from_file(path)
+        self.assertFalse(hasattr(config, "preset_volume"))
+
 
 if __name__ == "__main__":
     unittest.main()
