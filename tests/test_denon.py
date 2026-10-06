@@ -334,6 +334,47 @@ class VolumeMemoryTests(unittest.TestCase):
         self.observe("MV20")
         self.assertNotIn("z1", self.client._restores)
 
+    def test_acknowledged_input_is_not_treated_as_a_superseded_echo(self):
+        self.seed()
+        with patch.object(self.client, "_schedule_restore"):
+            self.client.send("SICD")
+            self.observe("SICD")
+            self.assertTrue(self.client._restores["z1"].ready)
+            self.client.send("SITV")
+            pending = self.client._restores["z1"]
+            self.observe("SICD", "MV18")
+        self.client._restore_volume("z1", pending)
+        self.assertNotIn("z1", self.client._restores)
+        self.assertEqual(self.client.snapshot()["zones"]["z1"]["input"], "CD")
+        self.assertEqual(self.client._volumes["z1"]["CD"], 18)
+        self.assertEqual(self.commands(), ["SICD", "SITV"])
+
+    def test_superseded_input_echo_is_ignored_only_once(self):
+        self.seed()
+        with patch.object(self.client, "_schedule_restore"):
+            self.client.send("SICD")
+            self.client.send("SITV")
+            pending = self.client._restores["z1"]
+            self.observe("SICD")
+            self.assertIs(self.client._restores["z1"], pending)
+            self.assertEqual(self.client.snapshot()["zones"]["z1"]["input"], "TV")
+            self.observe("SICD", "MV18")
+        self.client._restore_volume("z1", pending)
+        self.assertNotIn("z1", self.client._restores)
+        self.assertEqual(self.client._volumes["z1"]["CD"], 18)
+        self.assertEqual(self.commands(), ["SICD", "SITV"])
+
+    def test_authoritative_input_clears_marker_after_manual_volume_cancel(self):
+        self.seed()
+        self.client.send("SICD")
+        self.client.send("MV35")
+        self.observe("SIDVD", "MV18")
+        self.assertNotIn("z1", self.client._unconfirmed_inputs)
+        self.assertEqual(self.client._volumes["z1"]["DVD"], 18)
+        self.client.send("ZMON")
+        self.finish()
+        self.assertEqual(self.commands(), ["SICD", "MV35", "ZMON", "MV18"])
+
     def test_unsolicited_input_during_restore_cancels_recording_gate(self):
         self.seed()
         self.client.send("SICD")

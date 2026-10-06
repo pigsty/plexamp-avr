@@ -287,6 +287,7 @@ class DenonClient:
             superseded = (pending is not None and value != pending.target
                           and value in self._superseded_inputs.get(zone, set()))
             if superseded:
+                self._superseded_inputs[zone].discard(value)
                 changed = False
             else:
                 changed = self._apply(line)
@@ -404,10 +405,9 @@ class DenonClient:
                 value.startswith(_IGNORED_ZONE_EVENTS) or value.startswith("MU")):
             return
         superseded = set(self._superseded_inputs.get(zone, set()))
-        previous = self._restores.get(zone)
-        if previous is not None and previous.target is not None and (
-                previous.echo == build_zone_command(zone, "input", previous.target)):
-            superseded.add(previous.target)
+        unconfirmed = self._unconfirmed_inputs.get(zone)
+        if unconfirmed is not None:
+            superseded.add(unconfirmed)
         self._cancel_restore(zone)
         superseded.discard(target)
         if superseded:
@@ -434,8 +434,8 @@ class DenonClient:
         is_input = head == "SI" or (head in {"Z2", "Z3"} and value
                     and not value.isdigit() and value not in _RESERVED_INPUTS
                     and not value.startswith(_IGNORED_ZONE_EVENTS))
-        if is_input and self._unconfirmed_inputs.get(zone) == value:
-            self._unconfirmed_inputs.pop(zone)
+        if is_input:
+            self._unconfirmed_inputs.pop(zone, None)
         pending = self._restores.get(zone)
         if pending is not None and is_input and pending.target is not None and value != pending.target:
             self._cancel_restore(zone)
