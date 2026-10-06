@@ -80,7 +80,9 @@ class WebhookTests(unittest.TestCase):
                 "method": "PUT", "url": f"{url}/fail/z2-cd",
             })
             self.assertEqual(status, 201, z2_cd)
-            saved = json.loads((self.data_dir / "webhooks.json").read_text())
+            store = self.data_dir / "webhooks.json"
+            self.assertTrue(store.exists())
+            saved = json.loads(docker("exec", container, "cat", "/data/webhooks.json").stdout)
             self.assertEqual(saved["webhooks"], [z1_off, z2_cd])
 
             # Restart the container: webhooks are loaded from the mounted config store.

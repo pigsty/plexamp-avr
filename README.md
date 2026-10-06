@@ -38,7 +38,9 @@ Settings made in the web UI (currently webhooks) are saved in a config store
 directory, `data_dir` (default `/data`), as `webhooks.json`. The Docker image
 declares `/data` as a volume; mount a local directory there (as above, or
 `./data` in `docker-compose.yml`) to keep webhooks across container re-creation
-and to back them up or edit them on the host.
+and to back them up or edit them on the host. A new `webhooks.json` is created
+with mode `0600` because webhook URLs may contain tokens; if you change its mode,
+it is preserved on later saves.
 
 ## Web UI
 

@@ -132,10 +132,16 @@ class WebhookStore:
 
     def _save(self, webhooks: list[dict[str, Any]]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        # Webhook URLs may contain tokens: keep new files private, but preserve
+        # the mode of an existing file so it can be relaxed on the host.
+        try:
+            mode = self.path.stat().st_mode & 0o777
+        except FileNotFoundError:
+            mode = 0o600
         fd, temporary = tempfile.mkstemp(dir=self.path.parent, prefix=".webhooks-", suffix=".json")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                os.fchmod(handle.fileno(), 0o644)
+                os.fchmod(handle.fileno(), mode)
                 json.dump({"webhooks": webhooks}, handle, indent=2)
                 handle.write("\n")
             os.replace(temporary, self.path)

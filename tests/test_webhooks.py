@@ -103,6 +103,11 @@ class StoreTests(unittest.TestCase):
         self.assertTrue(reloaded.delete(second["id"]))
         self.assertFalse(reloaded.delete(second["id"]))
         self.assertEqual(WebhookStore(self.directory).list(), [updated])
+        path = self.directory / "webhooks.json"
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        path.chmod(0o644)
+        reloaded.create(hook())
+        self.assertEqual(path.stat().st_mode & 0o777, 0o644)
 
     def test_skips_invalid_entries_and_fixes_ids(self):
         self.directory.mkdir()
