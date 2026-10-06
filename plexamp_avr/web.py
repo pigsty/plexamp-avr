@@ -11,7 +11,7 @@ import struct
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 from urllib.parse import urlsplit
 
 from .denon import DenonClient, build_zone_command, normalize_zone
@@ -65,11 +65,13 @@ class WebServer:
         inputs: Iterable[str] = (),
         webhooks: WebhookStore | None = None,
         input_aliases: dict[str, str] | None = None,
+        command_listener: Callable[[str, str, str], None] | None = None,
     ):
         self.avr = avr
         self.webhooks = webhooks
         self.inputs = list(dict.fromkeys(inputs))
         self.input_aliases = dict(input_aliases or {})
+        self.command_listener = command_listener
         self._clients: set[queue.Queue] = set()
         self._clients_lock = threading.Lock()
         self._static = {
@@ -218,6 +220,14 @@ class RequestHandler(BaseHTTPRequestHandler):
         if not self.app.avr.send(command):
             self._error(503, "AVR is not connected")
             return
+        if self.app.command_listener is not None and action in {"power", "input", "mute"}:
+            if action == "power":
+                event_value = "off" if command.endswith("OFF") else "on"
+            elif action == "input":
+                event_value = command[2:]
+            else:
+                event_value = "on" if body[field] else "off"
+            self.app.command_listener(zone, action, event_value)
         self._json(202, {"zone": zone, "command": command})
 
     def do_PUT(self) -> None:

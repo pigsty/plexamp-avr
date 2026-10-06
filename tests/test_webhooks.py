@@ -78,6 +78,8 @@ class ValidationTests(unittest.TestCase):
             {"url": "ftp://host/x"},
             {"url": "file:///etc/passwd"},
             {"url": "http://host/a b"},
+            {"url": "http://user:pass@<ip>/hook"},
+            {"url": "http://host:not-a-port/hook"},
             {"url": "not a url"},
             {"enabled": "yes"},
             {"body": 5},
@@ -192,18 +194,56 @@ class DispatcherTests(unittest.TestCase):
         self.assertEqual(received_headers["Authorization"], "Bearer abc")
         self.assertEqual(received_headers["X-Webhook"], "projector")
 
+    def test_url_userinfo_becomes_basic_auth_and_is_redacted_from_logs(self):
+        url = f"http://test-user:p%40ss@127.0.0.1:{self.receiver.server.server_port}/auth"
+        webhook = self.store.create(hook(url=url))
+
+        with self.assertLogs("plexamp_avr.webhooks", level="INFO") as logs:
+            self.assertEqual(self.dispatcher.call(webhook, "Z1 power off"), 200)
+
+        self.receiver.server.requests.get(timeout=5)
+        received_headers = self.receiver.server.request_headers.get(timeout=5)
+        self.assertEqual(received_headers["Authorization"], "Basic dGVzdC11c2VyOnBAc3M=")
+        self.assertNotIn("test-user", "\n".join(logs.output))
+        self.assertNotIn("p%40ss", "\n".join(logs.output))
+
+    def test_invalid_url_encoding_is_reported_not_raised(self):
+        webhook = validate_webhook(hook(url=f"{self.receiver.url}/caf\N{LATIN SMALL LETTER E WITH ACUTE}"))
+        with self.assertLogs("plexamp_avr.webhooks", level="INFO") as logs:
+            result = self.dispatcher.call(webhook, "Z1 power off")
+        self.assertIsNone(result)
+        self.assertTrue(any("-> failed" in line for line in logs.output))
+        self.assertTrue(self.receiver.server.requests.empty())
+
+    def test_api_command_does_not_repeat_recent_avr_event(self):
+        self.store.create(hook(url=f"{self.receiver.url}/api-off"))
+        self.dispatcher.handle_snapshot({"zones": zones()})
+        self.dispatcher.handle_snapshot({"zones": zones(z1={"power": "off"})})
+
+        self.assertEqual(self.receiver.server.requests.get(timeout=5)[1], "/api-off")
+        self.dispatcher.handle_command("z1", "power", "off")
+        self.assertTrue(self.receiver.server.requests.empty())
+
     def test_logs_connection_failures(self):
-        with self.assertLogs("plexamp_avr.webhooks", level="WARNING") as logs:
+        with self.assertLogs("plexamp_avr.webhooks", level="INFO") as logs:
             self.assertIsNone(self.dispatcher.call(validate_webhook(hook(url="http://127.0.0.1:1/x")), "Z1 power off"))
+        self.assertIn("INFO:plexamp_avr.webhooks:Webhook 'Amp' (Z1 power off): POST http://127.0.0.1:1/x -> failed", logs.output)
         self.assertIn("failed", logs.output[0])
 
 
 class FakeAvr:
+    def __init__(self):
+        self.commands = []
+
     def add_listener(self, listener):
         pass
 
     def remove_listener(self, listener):
         pass
+
+    def send(self, command):
+        self.commands.append(command)
+        return True
 
 
 class ApiTests(unittest.TestCase):
@@ -211,8 +251,20 @@ class ApiTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.directory = temporary.name
+        self.store = WebhookStore(self.directory)
+        self.dispatcher = WebhookDispatcher(self.store)
+        self.dispatcher.start()
+        self.addCleanup(self.dispatcher.stop)
+        self.dispatcher.handle_snapshot({"zones": zones()})
+        self.avr = FakeAvr()
         self.server = WebServer(
-            FakeAvr(), "127.0.0.1", 0, ("MPLAY", "BD"), WebhookStore(self.directory), {"MPLAY": "Apple TV"}
+            self.avr,
+            "127.0.0.1",
+            0,
+            ("MPLAY", "BD"),
+            self.store,
+            {"MPLAY": "Apple TV"},
+            self.dispatcher.handle_command,
         )
         self.server.start()
         self.addCleanup(self.server.stop)
@@ -249,6 +301,31 @@ class ApiTests(unittest.TestCase):
             self.request("GET", "/api/inputs"),
             (200, {"inputs": ["MPLAY", "BD"], "aliases": {"MPLAY": "Apple TV"}}),
         )
+
+    def test_api_commands_fire_webhooks_and_avr_echoes_do_not_duplicate_them(self):
+        receiver = Receiver()
+        self.addCleanup(receiver.close)
+        self.store.create(hook(url=f"{receiver.url}/api-off"))
+        self.store.create(hook(event="input", value="MPLAY", url=f"{receiver.url}/api-input"))
+        self.store.create(hook(event="mute", value="on", url=f"{receiver.url}/api-mute"))
+
+        current_zones = zones()
+        commands = (
+            ("power", {"power": "off"}, "ZMOFF", "/api-off", {"power": "off"}),
+            ("input", {"input": "MPLAY"}, "SIMPLAY", "/api-input", {"input": "MPLAY"}),
+            ("mute", {"muted": True}, "MUON", "/api-mute", {"muted": True}),
+        )
+        for action, body, command, expected_path, state_change in commands:
+            with self.subTest(action=action):
+                status, response = self.request("POST", f"/api/zones/z1/{action}", body)
+                self.assertEqual(status, 202)
+                self.assertEqual(response["command"], command)
+                self.assertEqual(receiver.server.requests.get(timeout=5)[1], expected_path)
+                self.assertEqual(self.avr.commands[-1], command)
+
+                current_zones["z1"].update(state_change)
+                self.dispatcher.handle_snapshot({"zones": current_zones})
+                self.assertTrue(receiver.server.requests.empty())
 
     def test_serves_pwa_install_assets(self):
         for path, expected_type in (

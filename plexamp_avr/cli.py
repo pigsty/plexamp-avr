@@ -37,6 +37,7 @@ def main() -> None:
             (*config.avr_inputs, config.avr_input),
             webhooks,
             dict(config.avr_input_aliases),
+            dispatcher.handle_command,
         ).start()
     build_controller(config, avr).run()
 

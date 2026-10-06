@@ -8,11 +8,14 @@ import queue
 import re
 import tempfile
 import threading
+import time
 import uuid
+from base64 import b64encode
+from http.client import HTTPException
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlsplit
+from urllib.parse import unquote_to_bytes, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
 from .denon import ZONES, normalize_input, normalize_zone
@@ -27,6 +30,7 @@ MAX_BODY_LENGTH = 16384
 MAX_HEADERS = 50
 MAX_HEADER_VALUE_LENGTH = 8192
 WEBHOOKS_FILE = "webhooks.json"
+COMMAND_EVENT_DEDUPE_SECONDS = 2.0
 _ID_PATTERN = re.compile(r"[0-9a-f]{1,64}")
 _HEADER_NAME = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+")
 
@@ -37,6 +41,28 @@ def _on_off(value: Any) -> str:
     if isinstance(value, str) and value.strip().lower() in {"on", "off"}:
         return value.strip().lower()
     raise ValueError("value must be \"on\" or \"off\"")
+
+
+def _request_url_and_authorization(url: str) -> tuple[str, str | None]:
+    parts = urlsplit(url)
+    if parts.username is None:
+        return url, None
+    username = unquote_to_bytes(parts.username)
+    password = unquote_to_bytes(parts.password or "")
+    if b":" in username:
+        raise ValueError("URL username must not contain a colon")
+    netloc = parts.netloc.rsplit("@", 1)[-1]
+    request_url = urlunsplit((parts.scheme, netloc, parts.path, parts.query, ""))
+    authorization = "Basic " + b64encode(username + b":" + password).decode("ascii")
+    return request_url, authorization
+
+
+def _redact_url(url: str) -> str:
+    parts = urlsplit(url)
+    if "@" not in parts.netloc:
+        return url
+    netloc = parts.netloc.rsplit("@", 1)[-1]
+    return urlunsplit((parts.scheme, netloc, parts.path, parts.query, ""))
 
 
 def validate_webhook(data: Any) -> dict[str, Any]:
@@ -71,11 +97,18 @@ def validate_webhook(data: Any) -> dict[str, Any]:
     if not isinstance(url, str):
         raise ValueError("url must be a string")
     url = url.strip()
-    parts = urlsplit(url)
+    try:
+        parts = urlsplit(url)
+        hostname = parts.hostname
+        parts.port
+    except ValueError as err:
+        raise ValueError("url must have a valid host and optional numeric port") from err
     if (
         len(url) > MAX_URL_LENGTH
         or parts.scheme not in {"http", "https"}
-        or not parts.hostname
+        or not hostname
+        or "<" in hostname
+        or ">" in hostname
         or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in url)
     ):
         raise ValueError("url must be an absolute http:// or https:// URL")
@@ -239,6 +272,7 @@ class WebhookDispatcher:
         self.store = store
         self.timeout = timeout
         self._previous: dict[str, Any] | None = None
+        self._observed_events: dict[tuple[str, str, str], float] = {}
         self._state_lock = threading.Lock()
         self._queue: queue.Queue = queue.Queue(maxsize=100)
         self._thread: threading.Thread | None = None
@@ -255,12 +289,37 @@ class WebhookDispatcher:
 
     def handle_snapshot(self, snapshot: dict[str, Any]) -> None:
         zones = snapshot.get("zones", {})
+        now = time.monotonic()
         with self._state_lock:
             previous, self._previous = self._previous, zones
+            self._observed_events = {
+                event: observed_at
+                for event, observed_at in self._observed_events.items()
+                if now - observed_at <= COMMAND_EVENT_DEDUPE_SECONDS
+            }
+            events = zone_events(previous, zones) if previous is not None else []
+            for event in events:
+                self._observed_events[event] = now
         if previous is None:
             return
-        for zone, event, value in zone_events(previous, zones):
+        for zone, event, value in events:
             self.trigger(zone, event, value)
+
+    def handle_command(self, zone: str, event: str, value: str) -> None:
+        """Fire a webhook for an accepted API command and suppress its AVR echo."""
+        signature = (zone, event, value)
+        now = time.monotonic()
+        with self._state_lock:
+            observed_at = self._observed_events.pop(signature, None)
+            if observed_at is not None and now - observed_at <= COMMAND_EVENT_DEDUPE_SECONDS:
+                return
+            if self._previous is None:
+                self._previous = {}
+            zone_state = dict(self._previous.get(zone) or {})
+            field = {"power": "power", "input": "input", "mute": "muted"}[event]
+            zone_state[field] = (value == "on") if event == "mute" else value
+            self._previous[zone] = zone_state
+        self.trigger(zone, event, value)
 
     def trigger(self, zone: str, event: str, value: str) -> None:
         for webhook in self.store.list():
@@ -284,29 +343,34 @@ class WebhookDispatcher:
         """Perform the HTTP request for a webhook; returns the response code."""
         name = webhook.get("name") or webhook.get("id")
         method, url = webhook["method"], webhook["url"]
+        safe_url = _redact_url(url)
         data = None
-        request = Request(url, method=method, headers={"User-Agent": "plexamp-avr"})
-        if method != "GET" and webhook.get("body"):
-            body = webhook["body"]
-            data = body.encode("utf-8")
-            try:
-                json.loads(body)
-                content_type = "application/json"
-            except ValueError:
-                content_type = "text/plain; charset=utf-8"
-            request.add_header("Content-Type", content_type)
-        for header_name, header_value in webhook.get("headers", {}).items():
-            request.add_header(header_name, header_value)
-        request.data = data
         try:
+            request_url, authorization = _request_url_and_authorization(url)
+            request = Request(request_url, method=method, headers={"User-Agent": "plexamp-avr"})
+            if method != "GET" and webhook.get("body"):
+                body = webhook["body"]
+                data = body.encode("utf-8")
+                try:
+                    json.loads(body)
+                    content_type = "application/json"
+                except ValueError:
+                    content_type = "text/plain; charset=utf-8"
+                request.add_header("Content-Type", content_type)
+            if authorization is not None:
+                request.add_header("Authorization", authorization)
+            for header_name, header_value in webhook.get("headers", {}).items():
+                request.add_header(header_name, header_value)
+            request.data = data
             with urlopen(request, timeout=self.timeout) as response:
                 status = response.status
         except HTTPError as err:
             status = err.code
             err.close()
-        except (URLError, OSError, ValueError) as err:
+        except (HTTPException, URLError, OSError, UnicodeError, ValueError) as err:
             reason = getattr(err, "reason", err)
-            LOGGER.warning("Webhook %r (%s): %s %s failed: %s", name, event, method, url, reason)
+            LOGGER.info("Webhook %r (%s): %s %s -> failed", name, event, method, safe_url)
+            LOGGER.warning("Webhook %r (%s): %s %s failed: %s", name, event, method, safe_url, reason)
             return None
-        LOGGER.info("Webhook %r (%s): %s %s -> %d", name, event, method, url, status)
+        LOGGER.info("Webhook %r (%s): %s %s -> %d", name, event, method, safe_url, status)
         return status

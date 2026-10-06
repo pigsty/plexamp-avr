@@ -76,9 +76,11 @@ Each webhook maps an AVR event to an HTTP call:
   custom headers. Existing webhooks without this field continue to work.
 - **Enabled**: disabled webhooks are kept but not called.
 
-Webhooks fire when the AVR reports a change, whether it was made through this
-service, the web UI or on the AVR itself (e.g. `Z1 power off`, `Z2 input CD`).
-The state learned when first connecting to the AVR does not trigger webhooks.
+Webhooks fire for accepted power, input and mute commands sent through the API
+or web UI, even if the AVR does not echo the command, and for independent state
+changes reported by the AVR (e.g. `Z1 power off`, `Z2 input CD`). A matching AVR
+echo of an API command is not sent twice. The state learned when first
+connecting to the AVR does not trigger webhooks.
 Calls are made in the background, one at a time, using `request_timeout_seconds`.
 Each call is logged at info level with its response code, for example:
 
