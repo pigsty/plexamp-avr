@@ -13,3 +13,6 @@ plexamp-avr = "plexamp_avr.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["plexamp_avr*"]
+
+[tool.setuptools.package-data]
+plexamp_avr = ["web/*"]

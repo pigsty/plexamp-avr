@@ -9,3 +9,9 @@ off_timer_seconds = 900
 preset_volume = 60
 power_on_delay_seconds = 5.0
 request_timeout_seconds = 5.0
+# Web UI and HTTP API (no authentication; only expose on trusted networks).
+web_enabled = true
+web_host = 0.0.0.0
+web_port = 8080
+# Comma-separated inputs offered in the web UI. Leave empty for the defaults.
+avr_inputs =

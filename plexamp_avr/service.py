@@ -87,9 +87,9 @@ class AvrController:
             self.step()
 
 
-def build_controller(config: Config) -> AvrController:
+def build_controller(config: Config, avr: DenonClient | None = None) -> AvrController:
     return AvrController(
         PlexampClient(config.plexamp_host, config.plexamp_port, config.request_timeout_seconds),
-        DenonClient(config.avr_host, config.avr_port, config.request_timeout_seconds),
+        avr or DenonClient(config.avr_host, config.avr_port, config.request_timeout_seconds),
         config,
     )
