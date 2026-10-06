@@ -30,7 +30,14 @@ def main() -> None:
     avr.add_listener(dispatcher.handle_snapshot)
     avr.start()
     if config.web_enabled:
-        WebServer(avr, config.web_host, config.web_port, (*config.avr_inputs, config.avr_input), webhooks).start()
+        WebServer(
+            avr,
+            config.web_host,
+            config.web_port,
+            (*config.avr_inputs, config.avr_input),
+            webhooks,
+            dict(config.avr_input_aliases),
+        ).start()
     build_controller(config, avr).run()
 
 if __name__ == "__main__":

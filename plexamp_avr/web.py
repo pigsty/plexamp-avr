@@ -64,10 +64,12 @@ class WebServer:
         port: int,
         inputs: Iterable[str] = (),
         webhooks: WebhookStore | None = None,
+        input_aliases: dict[str, str] | None = None,
     ):
         self.avr = avr
         self.webhooks = webhooks
         self.inputs = list(dict.fromkeys(inputs))
+        self.input_aliases = dict(input_aliases or {})
         self._clients: set[queue.Queue] = set()
         self._clients_lock = threading.Lock()
         self._static = {
@@ -168,7 +170,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         elif path == "/api/status":
             self._json(200, self.app.avr.snapshot())
         elif path == "/api/inputs":
-            self._json(200, {"inputs": self.app.inputs})
+            self._json(200, {"inputs": self.app.inputs, "aliases": self.app.input_aliases})
         elif match := _ZONE_PATH.fullmatch(path):
             zone = normalize_zone(match[1])
             if zone is None:

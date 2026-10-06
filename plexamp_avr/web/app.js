@@ -1,8 +1,13 @@
 "use strict";
 
 const ZONE_NAMES = { z1: "Main zone", z2: "Zone 2", z3: "Zone 3" };
-const state = { zone: "z1", status: null, socketOpen: false, inputs: [], draggingVolume: false };
+const state = { zone: "z1", status: null, socketOpen: false, inputs: [], inputAliases: {}, draggingVolume: false };
 const $ = (id) => document.getElementById(id);
+
+function inputLabel(name) {
+  const alias = state.inputAliases[name];
+  return alias && alias !== name ? `${name} (${alias})` : name;
+}
 
 function currentZone() {
   return (state.status && state.status.zones && state.status.zones[state.zone]) || {};
@@ -25,9 +30,10 @@ function renderInputs(zone) {
   if (state.zone !== "z1" && !options.includes("SOURCE")) options.unshift("SOURCE");
   if (zone.input && !options.includes(zone.input)) options.push(zone.input);
   if (!zone.input) options.unshift("");
-  const current = [...select.options].map((option) => option.value);
-  if (current.join("\n") !== options.join("\n")) {
-    select.replaceChildren(...options.map((name) => new Option(name || "—", name)));
+  const current = [...select.options].map((option) => `${option.value}=${option.textContent}`);
+  const desired = options.map((name) => `${name}=${name ? inputLabel(name) : "—"}`);
+  if (current.join("\n") !== desired.join("\n")) {
+    select.replaceChildren(...options.map((name) => new Option(name ? inputLabel(name) : "—", name)));
   }
   select.value = zone.input || "";
 }
@@ -150,7 +156,7 @@ function renderValueOptions(selected) {
     const inputs = [...state.inputs];
     if ($("webhook-zone").value !== "z1" && !inputs.includes("SOURCE")) inputs.unshift("SOURCE");
     if (selected && !inputs.includes(selected)) inputs.push(selected);
-    options = [new Option("Any input", ""), ...inputs.map((name) => new Option(name, name))];
+    options = [new Option("Any input", ""), ...inputs.map((name) => new Option(inputLabel(name), name))];
   } else {
     options = [new Option("On", "on"), new Option("Off", "off")];
   }
@@ -312,6 +318,8 @@ fetch("api/inputs")
   .then((response) => response.json())
   .then((data) => {
     state.inputs = data.inputs || [];
+    state.inputAliases = data.aliases || {};
+    renderValueOptions($("webhook-value").value);
     render();
   })
   .catch(() => {});

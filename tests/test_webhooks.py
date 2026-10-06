@@ -211,7 +211,9 @@ class ApiTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.directory = temporary.name
-        self.server = WebServer(FakeAvr(), "127.0.0.1", 0, (), WebhookStore(self.directory))
+        self.server = WebServer(
+            FakeAvr(), "127.0.0.1", 0, ("MPLAY", "BD"), WebhookStore(self.directory), {"MPLAY": "Apple TV"}
+        )
         self.server.start()
         self.addCleanup(self.server.stop)
 
@@ -228,6 +230,12 @@ class ApiTests(unittest.TestCase):
 
     def test_crud(self):
         self.assertEqual(self.request("GET", "/api/webhooks"), (200, {"webhooks": []}))
+
+    def test_inputs_api_includes_aliases_without_replacing_input_names(self):
+        self.assertEqual(
+            self.request("GET", "/api/inputs"),
+            (200, {"inputs": ["MPLAY", "BD"], "aliases": {"MPLAY": "Apple TV"}}),
+        )
         status, created = self.request("POST", "/api/webhooks", hook())
         self.assertEqual(status, 201)
         path = f"/api/webhooks/{created['id']}"

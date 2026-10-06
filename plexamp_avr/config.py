@@ -25,6 +25,7 @@ class Config:
     web_host: str = "0.0.0.0"
     web_port: int = 8080
     avr_inputs: tuple[str, ...] = DEFAULT_INPUTS
+    avr_input_aliases: tuple[tuple[str, str], ...] = ()
     data_dir: str = "/data"
 
     @classmethod
@@ -37,6 +38,15 @@ class Config:
         inputs = tuple(
             name.strip().upper() for name in values.get("avr_inputs", "").split(",") if name.strip()
         )
+        input_aliases = []
+        for definition in values.get("avr_input_aliases", "").split(","):
+            if not definition.strip():
+                continue
+            input_name, separator, alias = definition.partition("=")
+            input_name, alias = input_name.strip().upper(), alias.strip()
+            if not separator or not input_name or not alias:
+                raise ValueError("avr_input_aliases entries must use INPUT=Alias format")
+            input_aliases.append((input_name, alias))
         return cls(
             plexamp_host=values.get("plexamp_host", cls.plexamp_host),
             plexamp_port=values.getint("plexamp_port", cls.plexamp_port),
@@ -51,5 +61,6 @@ class Config:
             web_host=values.get("web_host", cls.web_host),
             web_port=values.getint("web_port", cls.web_port),
             avr_inputs=inputs or DEFAULT_INPUTS,
+            avr_input_aliases=tuple(input_aliases),
             data_dir=values.get("data_dir", "").strip() or cls.data_dir,
         )

@@ -31,8 +31,11 @@ docker run -d \
 The installer uses only Python's standard library. Configure `plexamp_host`, `plexamp_port`, `avr_host`, `avr_input`, `off_timer_seconds`, and optionally `preset_volume`. Volume values are Denon values between 0 and 98; leave it empty to skip volume changes. The Plexamp defaults are `localhost:32500`.
 
 Web UI/API settings: `web_enabled` (default `true`), `web_host` (default `0.0.0.0`),
-`web_port` (default `8080`) and `avr_inputs`, a comma-separated list of inputs
-offered in the web UI (defaults to common Denon sources).
+`web_port` (default `8080`), `avr_inputs`, a comma-separated list of inputs
+offered in the web UI (defaults to common Denon sources), and optional
+`avr_input_aliases`, a comma-separated list of `INPUT=Label` pairs for display
+only. For example, `MPLAY=Apple TV` displays `MPLAY (Apple TV)` in the input
+pickers; the AVR command and webhook value remain `MPLAY`.
 
 Settings made in the web UI (currently webhooks) are saved in a config store
 directory, `data_dir` (default `/data`), as `webhooks.json`. The Docker image
