@@ -84,6 +84,37 @@ class ApiTests(unittest.TestCase):
                 self.fail(f"zone {zone} state {body} does not match {expected}")
             time.sleep(0.1)
 
+    @staticmethod
+    def volume_command(prefix, volume):
+        whole = int(volume)
+        fraction = round((volume - whole) * 10)
+        return f"{prefix}{whole:02d}" + (str(fraction) if fraction else "")
+
+    def test_api_restores_separate_input_volumes_in_each_zone(self):
+        for zone, input_prefix, volume_prefix, first_volume in (
+            ("z1", "SI", "MV", 31.5),
+            ("z2", "Z2", "Z2", 31),
+            ("z3", "Z3", "Z3", 31),
+        ):
+            with self.subTest(zone=zone):
+                for input_name, volume in (("DVD", first_volume), ("TV", 42)):
+                    status, response = self.request("POST", f"/api/zones/{zone}/input", {"input": input_name})
+                    self.assertEqual(status, 202, response)
+                    self.assertEqual(self.avr.commands.get(timeout=10), input_prefix + input_name)
+                    self.wait_for_zone(zone, input=input_name)
+                    status, response = self.request("POST", f"/api/zones/{zone}/volume", {"volume": volume})
+                    self.assertEqual(status, 202, response)
+                    self.assertEqual(self.avr.commands.get(timeout=10), self.volume_command(volume_prefix, volume))
+                    self.wait_for_zone(zone, volume=volume)
+                for input_name, volume in (("DVD", first_volume), ("TV", 42)):
+                    started = time.monotonic()
+                    status, response = self.request("POST", f"/api/zones/{zone}/input", {"input": input_name})
+                    self.assertEqual(status, 202, response)
+                    self.assertEqual(self.avr.commands.get(timeout=10), input_prefix + input_name)
+                    self.assertEqual(self.avr.commands.get(timeout=10), self.volume_command(volume_prefix, volume))
+                    self.assertLess(time.monotonic() - started, 5, "matching input echoes should restore early")
+                    self.wait_for_zone(zone, input=input_name, volume=volume)
+
     def test_website_loads(self):
         status, headers, body = self.request("GET", "/", raw=True)
         self.assertEqual(status, 200)
@@ -118,6 +149,8 @@ class ApiTests(unittest.TestCase):
         ):
             with self.subTest(zone=zone):
                 input_prefix = "SI" if zone == "z1" else prefix
+                status, previous = self.request("GET", f"/api/zones/{zone.lower()}")
+                self.assertEqual(status, 200)
                 cases = (
                     ("power", {"power": "off"}, f"{prefix}OFF", {"power": "off"}),
                     ("power", {"power": "on"}, f"{prefix}ON", {"power": "on"}),
@@ -132,6 +165,11 @@ class ApiTests(unittest.TestCase):
                     self.assertEqual(status, 202, response)
                     self.assertEqual(response, {"zone": zone.lower(), "command": command})
                     self.assertEqual(self.avr.commands.get(timeout=10), command)
+                    if action == "power" and body["power"] == "on":
+                        self.assertEqual(
+                            self.avr.commands.get(timeout=10),
+                            self.volume_command(volume_prefix, previous["volume"]),
+                        )
                     if expected:
                         self.wait_for_zone(zone.lower(), **expected)
 
@@ -179,9 +217,15 @@ class ApiTests(unittest.TestCase):
 
         # Changes made through the API are pushed as well.
         self.request("POST", "/api/zones/z2/power", {"power": "off"})
+        self.assertEqual(self.avr.commands.get(timeout=10), "Z2OFF")
         client.wait_for(lambda m: m["zones"]["z2"]["power"] == "off")
         self.request("POST", "/api/zones/z2/power", {"power": "on"})
+        self.assertEqual(self.avr.commands.get(timeout=10), "Z2ON")
         client.wait_for(lambda m: m["zones"]["z2"]["power"] == "on")
+        self.assertEqual(
+            self.avr.commands.get(timeout=10),
+            self.volume_command("Z2", initial["zones"]["z2"]["volume"]),
+        )
 
     def test_telnet_connection_is_persistent(self):
         for volume in (20, 21, 22):

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-import logging
 import json
+import logging
 import os
 import re
 import socket
+import tempfile
 import threading
 import time
 from collections import deque
@@ -147,6 +148,7 @@ class DenonClient:
         self._volumes: dict[str, dict[str, float]] = {zone: {} for zone in ZONES}
         self._restores: dict[str, _VolumeRestore] = {}
         self._unconfirmed_inputs: dict[str, str] = {}
+        self._superseded_inputs: dict[str, set[str]] = {}
         self._load_volumes()
         LOGGER.info("Denon client initialized with address: %s:%d", self.address, self.port)
 
@@ -279,8 +281,16 @@ class DenonClient:
         with self._condition:
             self._line_seq += 1
             self._lines.append((self._line_seq, line))
-            changed = self._apply(line)
-            self._volume_event(line)
+            head, value = line[:2], line[2:]
+            zone = "z1" if head == "SI" else head.lower()
+            pending = self._restores.get(zone)
+            superseded = (pending is not None and value != pending.target
+                          and value in self._superseded_inputs.get(zone, set()))
+            if superseded:
+                changed = False
+            else:
+                changed = self._apply(line)
+                self._volume_event(line)
             self._condition.notify_all()
         if changed:
             self._notify()
@@ -305,6 +315,8 @@ class DenonClient:
                     except (ValueError, TypeError):
                         continue
                     self._volumes[zone][name] = volume
+        except FileNotFoundError:
+            pass
         except (OSError, ValueError):
             LOGGER.warning("Could not load remembered AVR volumes from %s", self._volume_path)
 
@@ -322,10 +334,12 @@ class DenonClient:
         self._volumes[zone][name] = volume
         if self._volume_path is None:
             return
-        staging = self._volume_path.with_suffix(".json.new")
+        staging = None
         try:
             self._volume_path.parent.mkdir(parents=True, exist_ok=True)
-            with staging.open("w") as stream:
+            descriptor, name = tempfile.mkstemp(prefix=".volumes-", suffix=".json", dir=self._volume_path.parent)
+            staging = Path(name)
+            with os.fdopen(descriptor, "w") as stream:
                 json.dump(self._volumes, stream, sort_keys=True)
                 stream.flush()
                 os.fsync(stream.fileno())
@@ -333,11 +347,13 @@ class DenonClient:
         except OSError:
             LOGGER.warning("Could not persist remembered AVR volumes to %s", self._volume_path)
             try:
-                staging.unlink(missing_ok=True)
+                if staging is not None:
+                    staging.unlink(missing_ok=True)
             except OSError:
                 pass
 
     def _cancel_restore(self, zone: str) -> None:
+        self._superseded_inputs.pop(zone, None)
         pending = self._restores.pop(zone, None)
         if pending is not None and pending.timer is not None:
             pending.timer.cancel()
@@ -354,12 +370,13 @@ class DenonClient:
         pending.timer.start()
 
     def _track_command(self, command: str, suppress_power_restore: bool) -> None:
+        if command == "PWSTANDBY":
+            self._cancel_restores()
+            self._unconfirmed_inputs.clear()
+            return
         head, value = command[:2], command[2:]
         zone = "z1" if head in {"SI", "ZM", "MV"} else head.lower()
         if zone not in ZONES or "?" in value:
-            return
-        if command == "PWSTANDBY":
-            self._cancel_restores()
             return
         if value == "OFF" and head in {"ZM", "Z2", "Z3"}:
             self._cancel_restore(zone)
@@ -371,16 +388,30 @@ class DenonClient:
             return
         power_on = value == "ON" and head in {"ZM", "Z2", "Z3"}
         if power_on and suppress_power_restore:
+            self._cancel_restore(zone)
+            # Guard power-on transition observations until the helper selects
+            # its destination, without scheduling an outgoing-input restore.
+            self._restores[zone] = _VolumeRestore(None, "")
             return
         if not power_on and head not in {"SI", "Z2", "Z3"}:
             return
         try:
-            target = self._zones[zone].input if power_on else normalize_input(value)
+            target = (self._unconfirmed_inputs.get(zone, self._zones[zone].input)
+                      if power_on else normalize_input(value))
         except ValueError:
             return
-        if not power_on and (value.startswith(_IGNORED_ZONE_EVENTS) or value.startswith("MU")):
+        if not power_on and head in {"Z2", "Z3"} and (
+                value.startswith(_IGNORED_ZONE_EVENTS) or value.startswith("MU")):
             return
+        superseded = set(self._superseded_inputs.get(zone, set()))
+        previous = self._restores.get(zone)
+        if previous is not None and previous.target is not None and (
+                previous.echo == build_zone_command(zone, "input", previous.target)):
+            superseded.add(previous.target)
         self._cancel_restore(zone)
+        superseded.discard(target)
+        if superseded:
+            self._superseded_inputs[zone] = superseded
         if not power_on:
             self._unconfirmed_inputs[zone] = target
         pending = _VolumeRestore(target, command)
@@ -406,6 +437,10 @@ class DenonClient:
         if is_input and self._unconfirmed_inputs.get(zone) == value:
             self._unconfirmed_inputs.pop(zone)
         pending = self._restores.get(zone)
+        if pending is not None and is_input and pending.target is not None and value != pending.target:
+            self._cancel_restore(zone)
+            self._unconfirmed_inputs.pop(zone, None)
+            pending = None
         if pending is not None:
             if pending.target is None and is_input:
                 pending.target = self._zones[zone].input
@@ -417,9 +452,18 @@ class DenonClient:
         if volume is None:
             return
         if pending is not None:
+            if (pending.ready and pending.target is not None
+                    and pending.target not in self._volumes[zone]
+                    and self._zones[zone].input == pending.target
+                    and zone not in self._unconfirmed_inputs):
+                self._cancel_restore(zone)
+                self._remember_volume(zone, volume)
+                return
             if pending.restoring != volume:
                 return
             self._cancel_restore(zone)
+            if self._zones[zone].input != pending.target:
+                return
         self._remember_volume(zone, volume)
 
     def _restore_volume(self, zone: str, pending: _VolumeRestore) -> None:
@@ -523,6 +567,8 @@ class DenonClient:
                     self._track_command(command, suppress_power_restore)
             except OSError as err:
                 LOGGER.warning("Denon Telnet command %r failed: %s", command, err)
+                with self._condition:
+                    self._cancel_restores()
                 self._shutdown(sock)
                 return False
             finally:
@@ -571,7 +617,7 @@ class DenonClient:
 
     def set_volume(self, volume: float) -> None:
         if volume > 98 or volume < 0:
-            raise ValueError("preset volume must be between 0 and 98")
+            raise ValueError("volume must be between 0 and 98")
         self.command("MV", format_volume(volume))
 
     def power_on_and_configure(self, input_name: str, delay: float) -> None:
