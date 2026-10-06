@@ -121,21 +121,17 @@ class WebServer:
             self._clients.discard(client)
 
     def snapshot(self) -> dict[str, Any]:
-        return self._with_playback(self.avr.snapshot())
-
-    def _with_playback(self, snapshot: dict[str, Any]) -> dict[str, Any]:
         playback = self.controller.playback_snapshot() if self.controller is not None else {
             "state": "unknown", "idle_remaining_seconds": None,
         }
-        return {**snapshot, "playback": playback}
+        return {**self.avr.snapshot(), "playback": playback}
 
     def _broadcast_playback(self) -> None:
-        self._broadcast(self.avr.snapshot())
+        self._broadcast()
 
-    def _broadcast(self, snapshot: dict[str, Any]) -> None:
-        snapshot = self._with_playback(snapshot)
-        message = json.dumps({"type": "status", **snapshot})
+    def _broadcast(self, _snapshot: dict[str, Any] | None = None) -> None:
         with self._clients_lock:
+            message = json.dumps({"type": "status", **self.snapshot()})
             for client in self._clients:
                 _offer(client, message)
 

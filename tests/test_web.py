@@ -44,6 +44,7 @@ class PlaybackStatusTests(unittest.TestCase):
         self.assertTrue(message["connected"])
         self.clock.monotonic.return_value = 27
         listener = self.avr.add_listener.call_args.args[0]
+        self.avr.snapshot.return_value = {"connected": False, "zones": {}}
         listener({"connected": False, "zones": {}})
         message = json.loads(client.get(timeout=1))
         self.assertFalse(message["connected"])
@@ -52,6 +53,16 @@ class PlaybackStatusTests(unittest.TestCase):
         self.controller.step()
         message = json.loads(client.get(timeout=1))
         self.assertEqual(message["playback"], {"state": "playing", "idle_remaining_seconds": None})
+
+    def test_delayed_callback_does_not_broadcast_a_stale_avr_snapshot(self):
+        client = self.server.register()
+        self.addCleanup(self.server.unregister, client)
+        old_snapshot = {"connected": True, "zones": {}}
+        self.avr.snapshot.return_value = {"connected": False, "zones": {}}
+        listener = self.avr.add_listener.call_args.args[0]
+        listener(old_snapshot)
+        message = json.loads(client.get(timeout=1))
+        self.assertFalse(message["connected"])
 
     def test_absent_controller_reports_unknown(self):
         self.server.controller = None
