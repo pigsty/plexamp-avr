@@ -119,6 +119,17 @@ class RequestHandler(BaseHTTPRequestHandler):
     def app(self) -> WebServer:
         return self.server.app  # type: ignore[attr-defined]
 
+    def _is_api_request(self) -> bool:
+        path = urlsplit(self.path).path
+        return path == "/api" or path.startswith("/api/")
+
+    def parse_request(self) -> bool:
+        if not super().parse_request():
+            return False
+        if self._is_api_request():
+            LOGGER.info("API request %s %s from %s", self.command, urlsplit(self.path).path, self.address_string())
+        return True
+
     def log_message(self, format: str, *args: Any) -> None:
         LOGGER.debug("%s - %s", self.address_string(), format % args)
 
@@ -138,6 +149,8 @@ class RequestHandler(BaseHTTPRequestHandler):
         self._send(status, json.dumps(payload).encode(), "application/json", headers)
 
     def _error(self, status: int, message: str, headers: dict[str, str] | None = None) -> None:
+        if self._is_api_request() and 400 <= status < 500:
+            LOGGER.warning("Invalid API request %s %s -> %d: %s", self.command, urlsplit(self.path).path, status, message)
         self._json(status, {"error": message}, headers)
 
     def do_HEAD(self) -> None:

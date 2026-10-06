@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 
 from .config import Config
 from .denon import DenonClient
@@ -10,15 +11,17 @@ from .web import WebServer
 from .webhooks import WebhookDispatcher, WebhookStore
 
 
+def _configure_logging(debug: bool) -> None:
+    level = "DEBUG" if debug else os.getenv("LOG_LEVEL", "info").upper()
+    logging.basicConfig(level=level, format="%(asctime)s %(levelname)s %(message)s")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default="/etc/plexamp-avr.conf")
     parser.add_argument("--debug", "-d", action="store_true", help="Enable debug logging")
     args = parser.parse_args()
-    if args.debug:
-        logging.basicConfig(level=logging.DEBUG, format="%(asctime)s %(levelname)s %(message)s")
-    else:
-        logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    _configure_logging(args.debug)
     config = Config.from_file(args.config)
     avr = DenonClient(config.avr_host, config.avr_port, config.request_timeout_seconds)
     webhooks = WebhookStore(config.data_dir)

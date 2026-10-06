@@ -6,6 +6,8 @@ services:
     container_name: plexamp-avr
     restart: unless-stopped
     network_mode: host
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-info}
     volumes:
       - /etc/plexamp-avr.conf:/etc/plexamp-avr.conf:ro
       - ./data:/data

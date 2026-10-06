@@ -239,6 +239,19 @@ class ApiTests(unittest.TestCase):
                 self.assertEqual(status, expected)
                 self.assertIn("error", response)
 
+    def test_logs_api_requests_and_invalid_reasons(self):
+        with self.assertLogs("plexamp_avr.web", level="INFO") as logs:
+            self.request("GET", "/api/webhooks")
+            self.request("POST", "/api/webhooks", hook(url="ftp://x"))
+
+        output = "\n".join(logs.output)
+        self.assertIn("INFO:plexamp_avr.web:API request GET /api/webhooks from 127.0.0.1", output)
+        self.assertIn(
+            "WARNING:plexamp_avr.web:Invalid API request POST /api/webhooks -> 400: "
+            "url must be an absolute http:// or https:// URL",
+            output,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
