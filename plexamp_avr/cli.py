@@ -43,6 +43,7 @@ def main() -> None:
             dict(config.avr_input_aliases),
             dispatcher.handle_command,
             controller,
+            webhook_trigger=dispatcher.trigger_manual,
         ).start()
     controller.run()
 

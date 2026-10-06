@@ -66,6 +66,10 @@ The countdown reserves space for its digits so updates do not shift the text.
 The **Webhooks** tab lists the configured webhooks and lets you add, edit,
 **duplicate** (opens a pre-filled copy, handy for webhooks with similar URLs)
 and delete them.
+Mark a webhook as **Favorite** when adding or editing it to show a button in the
+**Favorite webhooks** card below Plexamp on every zone page. Tap a button to queue
+a manual call; it does not send an AVR command or require the AVR to be connected.
+The UI confirms when the call is queued; its HTTP result is recorded in the server logs.
 
 On iPhone or iPad, open the web UI in Safari, tap **Share**, then **Add to Home
 Screen**. The app opens without Safari chrome and has a dedicated home-screen
@@ -86,7 +90,8 @@ Each webhook maps an AVR event to an HTTP call:
 - **Headers**: optional JSON object of HTTP header names and string values,
   for example `{"Authorization": "Bearer token"}`. Leave it empty for no
   custom headers. Existing webhooks without this field continue to work.
-- **Enabled**: disabled webhooks are kept but not called.
+- **Enabled**: controls automatic event calls; disabled webhooks can still be called manually.
+- **Favorite**: shows the webhook on the main page for manual calls (defaults to `false`).
 
 Webhooks fire for accepted power, input and mute commands sent through the API
 or web UI, even if the AVR does not echo the command, and for independent state
@@ -123,6 +128,7 @@ JSON with `Content-Type: application/json`.
 | `GET` | `/api/webhooks/{id}` | A single webhook |
 | `PUT` | `/api/webhooks/{id}` | Replace a webhook |
 | `DELETE` | `/api/webhooks/{id}` | Delete a webhook |
+| `POST` | `/api/webhooks/{id}/trigger` | Queue a manual call with `{}` as the JSON body (`202`); works regardless of enabled/favorite flags |
 | `GET` | `/api/ws` | WebSocket status stream |
 
 Status shape (`volume` uses Denon's 0–98 scale, where 80 is 0 dB; fields are
@@ -153,10 +159,10 @@ curl -X POST -H 'Content-Type: application/json' -d '{"power": "on"}' http://loc
 # {"zone": "z2", "command": "Z2ON"}
 ```
 
-Webhook shape (`name`, `enabled`, `body` and `headers` are optional when creating):
+Webhook shape (`name`, `enabled`, `favorite`, `body` and `headers` are optional when creating):
 
 ```json
-{"id": "6b977e6c58cf4d0d85782cc1b26a4bf4", "name": "Z2 CD", "enabled": true, "zone": "z2",
+{"id": "6b977e6c58cf4d0d85782cc1b26a4bf4", "name": "Z2 CD", "enabled": true, "favorite": false, "zone": "z2",
  "event": "input", "value": "CD", "method": "POST", "url": "http://192.168.1.5/hook", "body": "{\"on\": true}",
  "headers": {"Authorization": "Bearer token"}}
 ```
@@ -170,7 +176,7 @@ WebSocket and in `/api/status`. Errors return JSON `{"error": "..."}` with
 `411` (missing `Content-Length`), `413` (body larger than 4 KiB, 64 KiB for
 webhooks), `415` (not JSON), `426` (`/api/ws` without a WebSocket upgrade),
 `500` (webhooks could not be saved to the config store) or `503` (AVR not
-connected).
+connected, webhook dispatcher unavailable or its queue full).
 
 ### WebSocket
 

@@ -5,6 +5,7 @@ import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from unittest.mock import Mock
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
@@ -65,6 +66,8 @@ class ValidationTests(unittest.TestCase):
         self.assertEqual(result["headers"], {"X-Test": " yes "})
         self.assertEqual(validate_webhook(hook())["headers"], {})
         self.assertTrue(result["enabled"])
+        self.assertFalse(result["favorite"])
+        self.assertTrue(validate_webhook(hook(favorite=True))["favorite"])
         self.assertEqual(validate_webhook(hook(event="input", value=""))["value"], "")
         self.assertEqual(validate_webhook(hook(event="mute", value=True))["value"], "on")
 
@@ -82,6 +85,9 @@ class ValidationTests(unittest.TestCase):
             {"url": "http://host:not-a-port/hook"},
             {"url": "not a url"},
             {"enabled": "yes"},
+            {"favorite": "yes"},
+            {"favorite": 1},
+            {"favorite": None},
             {"body": 5},
             {"headers": []},
             {"headers": {"Bad Header": "value"}},
@@ -129,6 +135,20 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(len(ids), 3)
         self.assertEqual(ids[0], "abc")
         self.assertEqual(len(set(ids)), 3)
+
+    def test_favorites_persist_and_can_be_removed(self):
+        store = WebhookStore(self.directory)
+        created = store.create(hook(favorite=True))
+        self.assertTrue(WebhookStore(self.directory).get(created["id"])["favorite"])
+        store.update(created["id"], hook(favorite=False))
+        self.assertFalse(WebhookStore(self.directory).get(created["id"])["favorite"])
+
+    def test_legacy_webhooks_default_to_not_favorite(self):
+        self.directory.mkdir()
+        (self.directory / "webhooks.json").write_text(json.dumps({
+            "webhooks": [{"id": "abc", **hook()}],
+        }))
+        self.assertFalse(WebhookStore(self.directory).get("abc")["favorite"])
 
 
 class EventTests(unittest.TestCase):
@@ -193,6 +213,31 @@ class DispatcherTests(unittest.TestCase):
         received_headers = self.receiver.server.request_headers.get(timeout=5)
         self.assertEqual(received_headers["Authorization"], "Bearer abc")
         self.assertEqual(received_headers["X-Webhook"], "projector")
+
+    def test_manual_call_ignores_enabled_and_does_not_trigger_other_hooks(self):
+        webhook = self.store.create(hook(
+            enabled=False, favorite=True, url=f"{self.receiver.url}/manual",
+            method="PUT", body='{"manual": true}', headers={"X-Test": "manual"},
+        ))
+        self.store.create(hook(url=f"{self.receiver.url}/automatic"))
+        previous = self.dispatcher._previous
+        with self.assertLogs("plexamp_avr.webhooks", level="INFO") as logs:
+            self.assertTrue(self.dispatcher.trigger_manual(webhook))
+            self.assertEqual(self.receiver.server.requests.get(timeout=5), (
+                "PUT", "/manual", "application/json", b'{"manual": true}',
+            ))
+            self.dispatcher.stop()
+        self.assertEqual(self.receiver.server.request_headers.get(timeout=5)["X-Test"], "manual")
+        self.assertTrue(self.receiver.server.requests.empty())
+        self.assertIs(self.dispatcher._previous, previous)
+        self.assertTrue(any("(manual)" in line for line in logs.output))
+
+    def test_manual_call_reports_a_full_queue(self):
+        dispatcher = WebhookDispatcher(self.store)
+        webhook = self.store.create(hook())
+        for _ in range(dispatcher._queue.maxsize):
+            self.assertTrue(dispatcher.trigger_manual(webhook))
+        self.assertFalse(dispatcher.trigger_manual(webhook))
 
     def test_url_userinfo_becomes_basic_auth_and_is_redacted_from_logs(self):
         url = f"http://test-user:p%40ss@127.0.0.1:{self.receiver.server.server_port}/auth"
@@ -265,6 +310,7 @@ class ApiTests(unittest.TestCase):
             self.store,
             {"MPLAY": "Apple TV"},
             self.dispatcher.handle_command,
+            webhook_trigger=self.dispatcher.trigger_manual,
         )
         self.server.start()
         self.addCleanup(self.server.stop)
@@ -301,6 +347,66 @@ class ApiTests(unittest.TestCase):
             self.request("GET", "/api/inputs"),
             (200, {"inputs": ["MPLAY", "BD"], "aliases": {"MPLAY": "Apple TV"}}),
         )
+
+    def test_favorite_can_be_created_updated_and_reloaded_via_api(self):
+        status, created = self.request("POST", "/api/webhooks", hook(favorite=True))
+        self.assertEqual(status, 201)
+        self.assertTrue(created["favorite"])
+        self.assertEqual(WebhookStore(self.directory).get(created["id"]), created)
+        path = f"/api/webhooks/{created['id']}"
+        status, updated = self.request("PUT", path, hook(favorite=False))
+        self.assertEqual(status, 200)
+        self.assertFalse(updated["favorite"])
+        self.assertEqual(WebhookStore(self.directory).get(created["id"]), updated)
+        self.assertEqual(self.request("POST", "/api/webhooks", hook(favorite="true"))[0], 400)
+
+    def test_manual_trigger_calls_only_the_selected_saved_webhook_without_avr_commands(self):
+        receiver = Receiver()
+        self.addCleanup(receiver.close)
+        self.store.create(hook(url=f"{receiver.url}/other"))
+        for favorite in (False, True):
+            with self.subTest(favorite=favorite):
+                webhook = self.store.create(hook(
+                    enabled=False, favorite=favorite, url=f"{receiver.url}/manual",
+                ))
+                path = f"/api/webhooks/{webhook['id']}/trigger"
+                self.assertEqual(self.request("POST", path, {}), (202, {"triggered": webhook["id"]}))
+                self.assertEqual(receiver.server.requests.get(timeout=5)[1], "/manual")
+        self.assertEqual(self.avr.commands, [])
+        self.assertTrue(receiver.server.requests.empty())
+
+    def test_manual_trigger_errors_do_not_dispatch(self):
+        webhook = self.store.create(hook())
+        path = f"/api/webhooks/{webhook['id']}/trigger"
+        trigger = Mock(return_value=True)
+        self.server.webhook_trigger = trigger
+        for method in ("GET", "HEAD", "PUT", "DELETE"):
+            with self.subTest(method=method):
+                request = Request(f"http://127.0.0.1:{self.server.port}{path}", method=method)
+                with self.assertRaises(HTTPError) as error:
+                    urlopen(request, timeout=5)
+                self.assertEqual(error.exception.code, 405)
+                self.assertEqual(error.exception.headers["Allow"], "POST")
+                error.exception.close()
+        cases = (
+            ("/api/webhooks/abc/trigger", {}, "application/json", 404),
+            (path, {"url": "http://different.local"}, "application/json", 400),
+            (path, [], "application/json", 400),
+            (path, {}, "text/plain", 415),
+            (path, None, "application/json", 415),
+            ("/api/webhooks/not-an-id/trigger", {}, "application/json", 404),
+        )
+        for url, body, content_type, expected in cases:
+            with self.subTest(url=url, body=body):
+                self.assertEqual(self.request("POST", url, body, content_type)[0], expected)
+        trigger.assert_not_called()
+        trigger.return_value = False
+        self.assertEqual(self.request("POST", path, {})[0], 503)
+        trigger.assert_called_once_with(webhook)
+        self.server.webhook_trigger = None
+        self.assertEqual(self.request("POST", path, {})[0], 503)
+        self.server.webhooks = None
+        self.assertEqual(self.request("POST", path, {})[0], 404)
 
     def test_api_commands_fire_webhooks_and_avr_echoes_do_not_duplicate_them(self):
         receiver = Receiver()
