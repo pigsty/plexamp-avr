@@ -21,6 +21,7 @@
     <button type="button" role="tab" id="tab-z1" data-zone="z1" aria-selected="true" aria-controls="zone-panel">Z1</button>
     <button type="button" role="tab" id="tab-z2" data-zone="z2" aria-selected="false" aria-controls="zone-panel">Z2</button>
     <button type="button" role="tab" id="tab-z3" data-zone="z3" aria-selected="false" aria-controls="zone-panel">Z3</button>
+    <button type="button" role="tab" id="tab-nav" data-view="nav" aria-selected="false" aria-controls="nav-panel">Nav</button>
     <button type="button" role="tab" id="tab-webhooks" data-view="webhooks" aria-selected="false" aria-controls="webhooks-panel">Webhooks</button>
   </nav>
   <main id="zone-panel" role="tabpanel" aria-labelledby="tab-z1">
@@ -45,7 +46,35 @@
       </div>
       <button type="button" id="mute" class="toggle wide" aria-pressed="false">Mute</button>
     </section>
+    <section class="card">
+      <h2>Sound Mode</h2>
+      <div id="sound-modes" class="sound-modes" role="group" aria-label="Sound mode">
+        <button type="button" class="sound-mode" data-mode="movie" aria-pressed="false">Movie</button>
+        <button type="button" class="sound-mode" data-mode="music" aria-pressed="false">Music</button>
+        <button type="button" class="sound-mode" data-mode="game" aria-pressed="false">Game</button>
+        <button type="button" class="sound-mode" data-mode="pure" aria-pressed="false">Pure</button>
+      </div>
+    </section>
     <p id="error" class="error" role="alert" hidden></p>
+  </main>
+  <main id="nav-panel" role="tabpanel" aria-labelledby="tab-nav" hidden>
+    <section class="card">
+      <h2>Navigation</h2>
+      <div id="nav-controls" class="nav-controls" role="group" aria-label="AVR remote controls">
+        <button type="button" class="nav-action" data-key="info">Info</button>
+        <button type="button" class="nav-action" data-key="option">Option</button>
+        <button type="button" class="nav-action" data-key="back">Back</button>
+        <button type="button" class="nav-action" data-key="setup">Setup</button>
+        <div class="dpad" role="group" aria-label="Directional pad">
+          <button type="button" data-key="up" class="dpad-up" aria-label="Up">↑</button>
+          <button type="button" data-key="left" class="dpad-left" aria-label="Left">←</button>
+          <button type="button" data-key="enter" class="dpad-enter">Enter</button>
+          <button type="button" data-key="right" class="dpad-right" aria-label="Right">→</button>
+          <button type="button" data-key="down" class="dpad-down" aria-label="Down">↓</button>
+        </div>
+      </div>
+    </section>
+    <p id="nav-error" class="error" role="alert" hidden></p>
   </main>
   <main id="webhooks-panel" role="tabpanel" aria-labelledby="tab-webhooks" hidden>
     <section class="card row">

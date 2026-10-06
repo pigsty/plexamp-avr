@@ -98,10 +98,20 @@ class HelperTests(unittest.TestCase):
         self.assertEqual(build_zone_command("z3", "volume", 40), "Z340")
         self.assertEqual(build_zone_command("z1", "mute", True), "MUON")
         self.assertEqual(build_zone_command("z2", "mute", False), "Z2MUOFF")
+        for mode, command in (
+            ("movie", "MSMOVIE"),
+            ("music", "MSMUSIC"),
+            ("game", "MSGAME"),
+            ("pure", "MSPURE DIRECT"),
+        ):
+            self.assertEqual(build_zone_command("z1", "sound-mode", mode), command)
         for action, value in (("input", "CD\rZMOFF"), ("input", "ON"), ("input", 1), ("mute", "on"),
-                              ("volume", True), ("volume", "loud"), ("power", 1)):
+                              ("volume", True), ("volume", "loud"), ("power", 1),
+                              ("sound-mode", "invalid"), ("sound-mode", "movie\rZMOFF")):
             with self.subTest(action=action, value=value), self.assertRaises(ValueError):
                 build_zone_command("z2", action, value)
+        with self.assertRaises(ValueError):
+            build_zone_command("z2", "sound-mode", "movie")
 
     def test_normalize_zone(self):
         self.assertEqual(normalize_zone("Z2"), "z2")
@@ -128,11 +138,11 @@ class DenonClientTests(unittest.TestCase):
         self.client.add_listener(snapshots.append)
         self.assertTrue(self.client.wait_connected(2))
         self.assertTrue(self.server.wait(lambda: len(self.server.connections) == 1))
-        self.server.send(b"ZMON\rSICD\rMV455\rMVMAX 98\rMUON\rZ2OFF\rZ2TUNER\rZ230\rZ2CVFL 50\rZ3MUOFF\r")
+        self.server.send(b"ZMON\rSICD\rMV455\rMVMAX 98\rMUON\rMSMOVIE\rZ2OFF\rZ2TUNER\rZ230\rZ2CVFL 50\rZ3MUOFF\r")
         self.assertTrue(self.server.wait(lambda: snapshots and snapshots[-1]["zones"]["z3"]["muted"] is False))
         zones = self.client.snapshot()["zones"]
-        self.assertEqual(zones["z1"], {"power": "on", "input": "CD", "volume": 45.5, "muted": True})
-        self.assertEqual(zones["z2"], {"power": "off", "input": "TUNER", "volume": 30, "muted": None})
+        self.assertEqual(zones["z1"], {"power": "on", "input": "CD", "volume": 45.5, "muted": True, "sound_mode": "MOVIE"})
+        self.assertEqual(zones["z2"], {"power": "off", "input": "TUNER", "volume": 30, "muted": None, "sound_mode": None})
         self.server.send(b"PWSTANDBY\r")
         self.assertTrue(self.server.wait(lambda: snapshots[-1]["zones"]["z1"]["power"] == "off"))
 

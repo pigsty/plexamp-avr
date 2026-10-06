@@ -91,7 +91,7 @@ class MockAvr(socketserver.ThreadingTCPServer):
         self.connections = 0
         self.commands = queue.Queue()
         self.zones = {
-            zone: {"power": power, "input": input_name, "volume": 40.0, "mute": "OFF"}
+            zone: {"power": power, "input": input_name, "volume": 40.0, "mute": "OFF", "sound_mode": "MOVIE"}
             for zone in ("Z1", "Z2", "Z3")
         }
 
@@ -124,6 +124,7 @@ class MockAvr(socketserver.ThreadingTCPServer):
             "SI?": [f"SI{main['input']}"],
             "MV?": [f"MV{_volume(main['volume'])}", "MVMAX 98"],
             "MU?": [f"MU{main['mute']}"],
+            "MS?": [f"MS{main['sound_mode']}"],
         }
         for zone in ("Z2", "Z3"):
             state = self.zones[zone]
@@ -141,6 +142,9 @@ class MockAvr(socketserver.ThreadingTCPServer):
             self.emit(*events)
 
     def _apply(self, command):
+        if command.startswith("MS"):
+            self.zones["Z1"]["sound_mode"] = command[2:]
+            return [f"MS{command[2:]}"]
         if command[:2] in ("ZM", "SI", "MV", "MU"):
             zone, head, value = "Z1", command[:2], command[2:]
             if head == "ZM":

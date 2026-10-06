@@ -32,7 +32,19 @@ STATIC_FILES = {
     "/icon-512.png": ("icon-512.png", "image/png"),
 }
 # Request body field used by each zone action.
-ACTIONS = {"power": "power", "input": "input", "volume": "volume", "mute": "muted"}
+SOUND_MODE_ACTION = "sound-mode"
+ACTIONS = {"power": "power", "input": "input", "volume": "volume", "mute": "muted", SOUND_MODE_ACTION: "mode"}
+REMOTE_COMMANDS = {
+    "info": "MNINF",
+    "option": "MNOPT",
+    "back": "MNRTN",
+    "setup": "MNMEN",
+    "up": "MNUP",
+    "down": "MNDOWN",
+    "left": "MNLEFT",
+    "right": "MNRIGHT",
+    "enter": "MNENT",
+}
 MAX_BODY_BYTES = 4096
 MAX_WEBHOOK_BODY_BYTES = 65536
 MAX_FRAME_BYTES = 65536
@@ -210,6 +222,20 @@ class RequestHandler(BaseHTTPRequestHandler):
         path = urlsplit(self.path).path
         if path.startswith("/api/webhooks"):
             self._webhooks(path)
+            return
+        if path == "/api/remote":
+            body = self._read_json()
+            if body is _CLOSED:
+                return
+            key = body.get("key") if isinstance(body, dict) else None
+            command = REMOTE_COMMANDS.get(key) if isinstance(key, str) else None
+            if command is None:
+                self._error(400, "key must be a supported remote control")
+                return
+            if not self.app.avr.send(command):
+                self._error(503, "AVR is not connected")
+                return
+            self._json(202, {"command": command})
             return
         match = _ACTION_PATH.fullmatch(path)
         if match is None or match[2] not in ACTIONS:

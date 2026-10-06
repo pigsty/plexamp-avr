@@ -103,10 +103,17 @@ function render() {
   if (!state.draggingVolume) $("volume-value").textContent = formatVolume(zone.volume);
   $("mute").setAttribute("aria-pressed", String(zone.muted === true));
   $("mute").textContent = zone.muted ? "Muted" : "Mute";
+  for (const button of document.querySelectorAll(".sound-mode")) {
+    const mode = button.dataset.mode.toUpperCase();
+    const activeMode = (zone.sound_mode || "").toUpperCase();
+    button.setAttribute("aria-pressed", String(activeMode === mode || (mode === "PURE" && activeMode.startsWith("PURE"))));
+    button.disabled = !avrConnected || state.zone !== "z1";
+  }
 
   for (const id of ["power", "input", "volume", "volume-down", "volume-up", "mute"]) {
     $(id).disabled = !avrConnected;
   }
+  for (const button of document.querySelectorAll("#nav-controls button")) button.disabled = !avrConnected;
 }
 
 function selectZone(zone) {
@@ -115,6 +122,7 @@ function selectZone(zone) {
     tab.setAttribute("aria-selected", String(tab.dataset.zone === zone));
   }
   $("zone-panel").hidden = false;
+  $("nav-panel").hidden = true;
   $("webhooks-panel").hidden = true;
   $("zone-panel").setAttribute("aria-labelledby", `tab-${zone}`);
   showError("");
@@ -126,8 +134,21 @@ function selectWebhooks() {
     tab.setAttribute("aria-selected", String(tab.dataset.view === "webhooks"));
   }
   $("zone-panel").hidden = true;
+  $("nav-panel").hidden = true;
   $("webhooks-panel").hidden = false;
   loadWebhooks();
+}
+
+function selectNavigation() {
+  for (const tab of document.querySelectorAll('[role="tab"]')) {
+    tab.setAttribute("aria-selected", String(tab.dataset.view === "nav"));
+  }
+  $("zone-panel").hidden = true;
+  $("nav-panel").hidden = false;
+  $("webhooks-panel").hidden = true;
+  $("nav-panel").setAttribute("aria-labelledby", "tab-nav");
+  $("nav-error").hidden = true;
+  render();
 }
 
 // Webhooks ------------------------------------------------------------------
@@ -309,6 +330,26 @@ async function send(action, body) {
   }
 }
 
+async function sendRemote(key) {
+  try {
+    const response = await fetch("api/remote", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key }),
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      $("nav-error").textContent = data.error || `Request failed (${response.status})`;
+      $("nav-error").hidden = false;
+    } else {
+      $("nav-error").hidden = true;
+    }
+  } catch {
+    $("nav-error").textContent = "Network error";
+    $("nav-error").hidden = false;
+  }
+}
+
 let reconnectDelay = 1000;
 
 function connect() {
@@ -340,8 +381,20 @@ function connect() {
 }
 
 for (const tab of document.querySelectorAll('[role="tab"]')) {
-  tab.addEventListener("click", () => (tab.dataset.view === "webhooks" ? selectWebhooks() : selectZone(tab.dataset.zone)));
+  tab.addEventListener("click", () => {
+    if (tab.dataset.view === "webhooks") selectWebhooks();
+    else if (tab.dataset.view === "nav") selectNavigation();
+    else selectZone(tab.dataset.zone);
+  });
 }
+$("sound-modes").addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-mode]");
+  if (button && !button.disabled) send("sound-mode", { mode: button.dataset.mode });
+});
+$("nav-controls").addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-key]");
+  if (button && !button.disabled) sendRemote(button.dataset.key);
+});
 $("webhook-add").addEventListener("click", () => editWebhook(null, false));
 $("webhook-cancel").addEventListener("click", closeWebhookForm);
 $("webhook-form").addEventListener("submit", saveWebhook);

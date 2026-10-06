@@ -17,7 +17,7 @@ LOGGER = logging.getLogger(__name__)
 
 ZONES = ("z1", "z2", "z3")
 # Queries sent after every (re)connect to populate the zone state.
-STATUS_QUERIES = ("ZM?", "SI?", "MV?", "MU?", "Z2?", "Z2MU?", "Z3?", "Z3MU?")
+STATUS_QUERIES = ("ZM?", "SI?", "MV?", "MU?", "MS?", "Z2?", "Z2MU?", "Z3?", "Z3MU?")
 # Denon recommends at least 50ms between commands.
 COMMAND_INTERVAL_SECONDS = 0.05
 VOLUME_RESTORE_SECONDS = 5.0
@@ -35,6 +35,7 @@ class ZoneState:
     input: str | None = None
     volume: float | None = None
     muted: bool | None = None
+    sound_mode: str | None = None
 
 
 @dataclass
@@ -91,7 +92,7 @@ def _on_off(value: Any, field: str) -> str:
 
 
 def build_zone_command(zone: str, action: str, value: Any) -> str:
-    """Build the telnet command for a power, input, volume or mute change."""
+    """Build the telnet command for a supported zone control."""
     main = zone == "z1"
     prefix = "" if main else zone.upper()
     if action == "power":
@@ -107,6 +108,18 @@ def build_zone_command(zone: str, action: str, value: Any) -> str:
         if not isinstance(value, bool):
             raise ValueError("muted must be true or false")
         return f"{prefix}MU{'ON' if value else 'OFF'}"
+    if action == "sound-mode":
+        if not main:
+            raise ValueError("sound mode is only available for the main zone")
+        commands = {
+            "movie": "MSMOVIE",
+            "music": "MSMUSIC",
+            "game": "MSGAME",
+            "pure": "MSPURE DIRECT",
+        }
+        if not isinstance(value, str) or value not in commands:
+            raise ValueError("mode must be movie, music, game or pure")
+        return commands[value]
     raise ValueError(f"unknown action {action!r}")
 
 
@@ -525,6 +538,8 @@ class DenonClient:
             return volume is not None and self._set("z1", "volume", volume)
         if head == "MU" and value in {"ON", "OFF"}:
             return self._set("z1", "muted", value == "ON")
+        if head == "MS" and value:
+            return self._set("z1", "sound_mode", value.upper())
         if head in {"Z2", "Z3"} and value:
             zone = head.lower()
             if value in {"ON", "OFF"}:

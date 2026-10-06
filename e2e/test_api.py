@@ -123,6 +123,9 @@ class ApiTests(unittest.TestCase):
         self.assertIn("<title>Plexamp AVR</title>", page)
         for zone in ("Z1", "Z2", "Z3"):
             self.assertIn(f">{zone}</button>", page)
+        self.assertIn(">Nav</button>", page)
+        self.assertIn('data-mode="movie"', page)
+        self.assertIn('data-key="enter"', page)
         self.assertIn('id="playback-state"', page)
         self.assertIn('id="idle-timer"', page)
         for path, content_type in (("/app.js", "text/javascript"), ("/style.css", "text/css")):
@@ -140,7 +143,7 @@ class ApiTests(unittest.TestCase):
         self.assertGreater(body["playback"]["idle_remaining_seconds"], 0)
         self.assertEqual(sorted(body["zones"]), ["z1", "z2", "z3"])
         for zone in body["zones"].values():
-            self.assertEqual(sorted(zone), ["input", "muted", "power", "volume"])
+            self.assertEqual(sorted(zone), ["input", "muted", "power", "sound_mode", "volume"])
         status, body = self.request("GET", "/api/inputs")
         self.assertEqual(status, 200)
         self.assertEqual(body["inputs"][:3], ["CD", "TUNER", "GAME"])
@@ -177,6 +180,35 @@ class ApiTests(unittest.TestCase):
                     if expected:
                         self.wait_for_zone(zone.lower(), **expected)
 
+    def test_sound_mode_and_navigation_commands(self):
+        for mode, command in (
+            ("movie", "MSMOVIE"),
+            ("music", "MSMUSIC"),
+            ("game", "MSGAME"),
+            ("pure", "MSPURE DIRECT"),
+        ):
+            status, response = self.request("POST", "/api/zones/z1/sound-mode", {"mode": mode})
+            self.assertEqual(status, 202, response)
+            self.assertEqual(response, {"zone": "z1", "command": command})
+            self.assertEqual(self.avr.commands.get(timeout=10), command)
+            self.wait_for_zone("z1", sound_mode=command[2:])
+
+        for key, command in (
+            ("info", "MNINF"),
+            ("option", "MNOPT"),
+            ("back", "MNRTN"),
+            ("setup", "MNMEN"),
+            ("up", "MNUP"),
+            ("down", "MNDOWN"),
+            ("left", "MNLEFT"),
+            ("right", "MNRIGHT"),
+            ("enter", "MNENT"),
+        ):
+            status, response = self.request("POST", "/api/remote", {"key": key})
+            self.assertEqual(status, 202, response)
+            self.assertEqual(response, {"command": command})
+            self.assertEqual(self.avr.commands.get(timeout=10), command)
+
     def test_invalid_requests(self):
         cases = (
             ("GET", "/api/zones/z4", None, "application/json", 404),
@@ -189,6 +221,9 @@ class ApiTests(unittest.TestCase):
             ("POST", "/api/zones/z2/volume", {"volume": 20.5}, "application/json", 400),
             ("POST", "/api/zones/z1/mute", {"muted": "yes"}, "application/json", 400),
             ("POST", "/api/zones/z1/input", {"input": "CD\rZMOFF"}, "application/json", 400),
+            ("POST", "/api/zones/z1/sound-mode", {"mode": "movie\rZMOFF"}, "application/json", 400),
+            ("POST", "/api/zones/z2/sound-mode", {"mode": "movie"}, "application/json", 400),
+            ("POST", "/api/remote", {"key": "up\rZMOFF"}, "application/json", 400),
             ("POST", "/api/zones/z1/power", b"{not json", "application/json", 400),
             ("POST", "/api/zones/z1/power", b"power=on", "application/x-www-form-urlencoded", 415),
             ("GET", "/api/ws", None, "application/json", 426),
