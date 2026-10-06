@@ -165,7 +165,7 @@ function renderBodyField() {
 }
 
 function editWebhook(hook, duplicate) {
-  const source = hook || { name: "", enabled: true, zone: "z1", event: "power", value: "on", method: "POST", url: "", body: "" };
+  const source = hook || { name: "", enabled: true, zone: "z1", event: "power", value: "on", method: "POST", url: "", body: "", headers: {} };
   webhooks.editing = hook && !duplicate ? hook.id : null;
   $("webhook-form-title").textContent = !hook ? "New webhook" : duplicate ? "Duplicate webhook" : "Edit webhook";
   $("webhook-name").value = duplicate && source.name ? `${source.name} (copy)` : source.name;
@@ -176,6 +176,7 @@ function editWebhook(hook, duplicate) {
   $("webhook-method").value = source.method;
   $("webhook-url").value = source.url;
   $("webhook-body").value = source.body || "";
+  $("webhook-headers").value = JSON.stringify(source.headers || {}, null, 2);
   renderBodyField();
   showWebhookError("");
   $("webhook-form").hidden = false;
@@ -192,6 +193,17 @@ function closeWebhookForm() {
 
 async function saveWebhook(event) {
   event.preventDefault();
+  let headers;
+  try {
+    headers = JSON.parse($("webhook-headers").value || "{}");
+  } catch {
+    showWebhookError("Headers must be valid JSON.");
+    return;
+  }
+  if (!headers || typeof headers !== "object" || Array.isArray(headers)) {
+    showWebhookError("Headers must be a JSON object.");
+    return;
+  }
   const body = {
     name: $("webhook-name").value,
     enabled: $("webhook-enabled").checked,
@@ -201,6 +213,7 @@ async function saveWebhook(event) {
     method: $("webhook-method").value,
     url: $("webhook-url").value,
     body: $("webhook-body").value,
+    headers,
   };
   try {
     if (webhooks.editing) {

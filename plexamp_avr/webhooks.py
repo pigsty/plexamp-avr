@@ -24,8 +24,11 @@ METHODS = ("GET", "PUT", "POST")
 MAX_NAME_LENGTH = 100
 MAX_URL_LENGTH = 2048
 MAX_BODY_LENGTH = 16384
+MAX_HEADERS = 50
+MAX_HEADER_VALUE_LENGTH = 8192
 WEBHOOKS_FILE = "webhooks.json"
 _ID_PATTERN = re.compile(r"[0-9a-f]{1,64}")
+_HEADER_NAME = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+")
 
 
 def _on_off(value: Any) -> str:
@@ -81,6 +84,24 @@ def validate_webhook(data: Any) -> dict[str, Any]:
         body = ""
     if not isinstance(body, str) or len(body) > MAX_BODY_LENGTH:
         raise ValueError(f"body must be a string of at most {MAX_BODY_LENGTH} characters")
+    headers = data.get("headers", {})
+    if not isinstance(headers, dict) or len(headers) > MAX_HEADERS:
+        raise ValueError(f"headers must be an object with at most {MAX_HEADERS} entries")
+    normalized_headers = {}
+    for header_name, header_value in headers.items():
+        if not isinstance(header_name, str) or not _HEADER_NAME.fullmatch(header_name):
+            raise ValueError("header names must be valid HTTP field names")
+        if (
+            not isinstance(header_value, str)
+            or len(header_value) > MAX_HEADER_VALUE_LENGTH
+            or any((ord(char) < 32 and char != "\t") or ord(char) == 127 for char in header_value)
+        ):
+            raise ValueError("header values must be strings without control characters")
+        try:
+            header_value.encode("latin-1")
+        except UnicodeEncodeError as err:
+            raise ValueError("header values must contain only Latin-1 characters") from err
+        normalized_headers[header_name] = header_value
     return {
         "name": name.strip(),
         "enabled": enabled,
@@ -90,6 +111,7 @@ def validate_webhook(data: Any) -> dict[str, Any]:
         "method": method,
         "url": url,
         "body": body,
+        "headers": normalized_headers,
     }
 
 
@@ -273,6 +295,8 @@ class WebhookDispatcher:
             except ValueError:
                 content_type = "text/plain; charset=utf-8"
             request.add_header("Content-Type", content_type)
+        for header_name, header_value in webhook.get("headers", {}).items():
+            request.add_header(header_name, header_value)
         request.data = data
         try:
             with urlopen(request, timeout=self.timeout) as response:

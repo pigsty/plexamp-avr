@@ -62,6 +62,9 @@ Each webhook maps an AVR event to an HTTP call:
 - **Method**: `GET`, `PUT` or `POST`, with an absolute `http://` or `https://`
   **URL** and an optional **body** (sent for `PUT`/`POST` only, as
   `application/json` when it is valid JSON, otherwise `text/plain`).
+- **Headers**: optional JSON object of HTTP header names and string values,
+  for example `{"Authorization": "Bearer token"}`. Leave it empty for no
+  custom headers. Existing webhooks without this field continue to work.
 - **Enabled**: disabled webhooks are kept but not called.
 
 Webhooks fire when the AVR reports a change, whether it was made through this
@@ -122,11 +125,12 @@ curl -X POST -H 'Content-Type: application/json' -d '{"power": "on"}' http://loc
 # {"zone": "z2", "command": "Z2ON"}
 ```
 
-Webhook shape (`name`, `enabled` and `body` are optional when creating):
+Webhook shape (`name`, `enabled`, `body` and `headers` are optional when creating):
 
 ```json
 {"id": "6b977e6c58cf4d0d85782cc1b26a4bf4", "name": "Z2 CD", "enabled": true, "zone": "z2",
- "event": "input", "value": "CD", "method": "POST", "url": "http://192.168.1.5/hook", "body": "{\"on\": true}"}
+ "event": "input", "value": "CD", "method": "POST", "url": "http://192.168.1.5/hook", "body": "{\"on\": true}",
+ "headers": {"Authorization": "Bearer token"}}
 ```
 
 Because webhooks make the service send HTTP requests to arbitrary URLs, only

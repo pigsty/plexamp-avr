@@ -30,6 +30,7 @@ class RecordingHandler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", "0") or 0)
         body = self.rfile.read(length)
         self.server.requests.put((self.command, self.path, self.headers.get("Content-Type"), body))
+        self.server.request_headers.put(dict(self.headers.items()))
         status = 404 if self.path == "/missing" else 200
         self.send_response(status)
         self.send_header("Content-Length", "0")
@@ -45,6 +46,7 @@ class Receiver:
     def __init__(self):
         self.server = HTTPServer(("127.0.0.1", 0), RecordingHandler)
         self.server.requests = queue.Queue()
+        self.server.request_headers = queue.Queue()
         self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
         threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True).start()
 
@@ -55,11 +57,13 @@ class Receiver:
 
 class ValidationTests(unittest.TestCase):
     def test_normalizes_values(self):
-        result = validate_webhook(hook(zone="2", event="input", value=" cd ", method="put", url=" https://h/p "))
+        result = validate_webhook(hook(zone="2", event="input", value=" cd ", method="put", url=" https://h/p ", headers={"X-Test": " yes "}))
         self.assertEqual(result["zone"], "z2")
         self.assertEqual(result["value"], "CD")
         self.assertEqual(result["method"], "PUT")
         self.assertEqual(result["url"], "https://h/p")
+        self.assertEqual(result["headers"], {"X-Test": " yes "})
+        self.assertEqual(validate_webhook(hook())["headers"], {})
         self.assertTrue(result["enabled"])
         self.assertEqual(validate_webhook(hook(event="input", value=""))["value"], "")
         self.assertEqual(validate_webhook(hook(event="mute", value=True))["value"], "on")
@@ -77,6 +81,10 @@ class ValidationTests(unittest.TestCase):
             {"url": "not a url"},
             {"enabled": "yes"},
             {"body": 5},
+            {"headers": []},
+            {"headers": {"Bad Header": "value"}},
+            {"headers": {"X-Test": "bad\r\nInjected: yes"}},
+            {"headers": {"X-Test": 5}},
             {"event": "input", "value": "CD\rZMOFF"},
         ):
             with self.subTest(overrides=overrides):
@@ -93,7 +101,7 @@ class StoreTests(unittest.TestCase):
     def test_persists_webhooks(self):
         store = WebhookStore(self.directory)
         self.assertEqual(store.list(), [])
-        created = store.create(hook())
+        created = store.create(hook(headers={"X-Test": "persisted"}))
         second = store.create(hook(name="Second", zone="z2"))
         updated = store.update(created["id"], hook(name="Renamed"))
         self.assertEqual(updated["name"], "Renamed")
@@ -171,6 +179,18 @@ class DispatcherTests(unittest.TestCase):
         self.assertIn(f"INFO:plexamp_avr.webhooks:Webhook 'Z1 off' (Z1 power off): POST {url}/z1off -> 200", output)
         self.assertIn(f"Webhook 'Z2 CD' (Z2 input CD): PUT {url}/z2cd -> 200", output)
         self.assertIn(f"INFO:plexamp_avr.webhooks:Webhook 'Missing' (Z3 mute on): POST {url}/missing -> 404", output)
+
+    def test_sends_custom_headers(self):
+        webhook = self.store.create(hook(
+            url=f"{self.receiver.url}/headers",
+            headers={"Authorization": "Bearer abc", "X-Webhook": "projector"},
+        ))
+
+        self.assertEqual(self.dispatcher.call(webhook, "Z1 power off"), 200)
+        self.receiver.server.requests.get(timeout=5)
+        received_headers = self.receiver.server.request_headers.get(timeout=5)
+        self.assertEqual(received_headers["Authorization"], "Bearer abc")
+        self.assertEqual(received_headers["X-Webhook"], "projector")
 
     def test_logs_connection_failures(self):
         with self.assertLogs("plexamp_avr.webhooks", level="WARNING") as logs:
