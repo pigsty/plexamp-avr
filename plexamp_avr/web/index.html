@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#121418">
+  <title>Plexamp AVR</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="bar">
+    <h1>Plexamp AVR</h1>
+    <span id="connection" class="status" role="status">Connecting…</span>
+  </header>
+  <nav class="tabs" role="tablist" aria-label="Zones">
+    <button type="button" role="tab" id="tab-z1" data-zone="z1" aria-selected="true" aria-controls="zone-panel">Z1</button>
+    <button type="button" role="tab" id="tab-z2" data-zone="z2" aria-selected="false" aria-controls="zone-panel">Z2</button>
+    <button type="button" role="tab" id="tab-z3" data-zone="z3" aria-selected="false" aria-controls="zone-panel">Z3</button>
+  </nav>
+  <main id="zone-panel" role="tabpanel" aria-labelledby="tab-z1">
+    <section class="card row">
+      <h2 id="zone-name">Main zone</h2>
+      <button type="button" id="power" class="toggle" aria-pressed="false">Off</button>
+    </section>
+    <section class="card">
+      <label for="input">Input</label>
+      <select id="input"></select>
+    </section>
+    <section class="card">
+      <div class="row">
+        <label for="volume">Volume</label>
+        <output id="volume-value" for="volume">–</output>
+      </div>
+      <div class="volume">
+        <button type="button" id="volume-down" aria-label="Volume down">−</button>
+        <input type="range" id="volume" min="0" max="98" step="0.5" value="0">
+        <button type="button" id="volume-up" aria-label="Volume up">+</button>
+      </div>
+      <button type="button" id="mute" class="toggle wide" aria-pressed="false">Mute</button>
+    </section>
+    <p id="error" class="error" role="alert" hidden></p>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>
