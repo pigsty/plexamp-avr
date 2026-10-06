@@ -51,12 +51,8 @@ class FakeAvrServer:
                         return
 
     def wait(self, predicate, timeout=5):
-        deadline = time.monotonic() + timeout
-        while not predicate():
-            if time.monotonic() > deadline:
-                return False
-            time.sleep(0.01)
-        return True
+        with self.lock:
+            return self.lock.wait_for(predicate, timeout)
 
     def send(self, data):
         with self.lock:
@@ -130,6 +126,7 @@ class DenonClientTests(unittest.TestCase):
         snapshots = []
         self.client.add_listener(snapshots.append)
         self.assertTrue(self.client.wait_connected(2))
+        self.assertTrue(self.server.wait(lambda: len(self.server.connections) == 1))
         self.server.send(b"ZMON\rSICD\rMV455\rMVMAX 98\rMUON\rZ2OFF\rZ2TUNER\rZ230\rZ2CVFL 50\rZ3MUOFF\r")
         self.assertTrue(self.server.wait(lambda: snapshots and snapshots[-1]["zones"]["z3"]["muted"] is False))
         zones = self.client.snapshot()["zones"]
@@ -140,6 +137,7 @@ class DenonClientTests(unittest.TestCase):
 
     def test_reconnects_after_connection_drops(self):
         self.assertTrue(self.client.wait_connected(2))
+        self.assertTrue(self.server.wait(lambda: len(self.server.connections) == 1))
         self.server.drop()
         self.assertTrue(self.server.wait(lambda: len(self.server.connections) == 2))
         self.assertEqual(self.client.power_state(), "ON")
