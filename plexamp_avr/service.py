@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Callable, Protocol
 
 from .config import Config
 from .denon import DenonClient
@@ -30,6 +31,33 @@ class AvrController:
         self.clock = clock or SystemClock()
         self.previous_state: str | None = None
         self.idle_start_time: float | None = None
+        self._status_lock = threading.Lock()
+        self._playback_state = "unknown"
+        self._idle_deadline: float | None = None
+        self._listeners: list[Callable[[], None]] = []
+
+    def playback_snapshot(self) -> dict[str, str | float | None]:
+        with self._status_lock:
+            remaining = None if self._idle_deadline is None else max(0.0, self._idle_deadline - self.clock.monotonic())
+            return {"state": self._playback_state, "idle_remaining_seconds": remaining}
+
+    def add_listener(self, listener: Callable[[], None]) -> None:
+        with self._status_lock:
+            self._listeners.append(listener)
+
+    def remove_listener(self, listener: Callable[[], None]) -> None:
+        with self._status_lock:
+            self._listeners.remove(listener)
+
+    def _publish(self, state: str) -> None:
+        deadline = None if self.idle_start_time is None else self.idle_start_time + self.config.off_timer_seconds
+        with self._status_lock:
+            if (state, deadline) == (self._playback_state, self._idle_deadline):
+                return
+            self._playback_state, self._idle_deadline = state, deadline
+            listeners = list(self._listeners)
+        for listener in listeners:
+            listener()
 
     def step(self) -> None:
         current_state = self.plexamp.poll_with_retry()
@@ -37,6 +65,7 @@ class AvrController:
 
         # 1. Ignore unknown poll errors
         if current_state.is_unknown:
+            self._publish("unknown")
             return
 
         state_name = current_state.state.lower()
@@ -48,6 +77,7 @@ class AvrController:
         # 2. Transition: Transitioning TO Playing
         if current_state.is_playing:
             self.idle_start_time = None
+            self._publish(state_name)
             if self.previous_state != state_name:
                 if not self.avr.is_on():
                     LOGGER.info("Playback started; powering AVR on")
@@ -62,6 +92,8 @@ class AvrController:
         elif self.previous_state and self.previous_state in {"playing", "buffering"}:
             LOGGER.info("Playback changed to %s; starting %ds idle timer", state_name, self.config.off_timer_seconds)
             self.idle_start_time = now
+
+        self._publish(state_name)
 
         # 4. Sustained Idle Timer Expiration Check
         if self.idle_start_time is not None and (now - self.idle_start_time) >= self.config.off_timer_seconds:
@@ -80,6 +112,7 @@ class AvrController:
 
         # Record current state for the next step comparison
         self.previous_state = state_name
+        self._publish(state_name)
 
     def run(self) -> None:
         while True:

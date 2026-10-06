@@ -15,6 +15,7 @@ from typing import Any, Callable, Iterable
 from urllib.parse import urlsplit
 
 from .denon import DenonClient, build_zone_command, normalize_zone
+from .service import AvrController
 from .webhooks import WebhookStore
 
 LOGGER = logging.getLogger(__name__)
@@ -66,12 +67,14 @@ class WebServer:
         webhooks: WebhookStore | None = None,
         input_aliases: dict[str, str] | None = None,
         command_listener: Callable[[str, str, str], None] | None = None,
+        controller: AvrController | None = None,
     ):
         self.avr = avr
         self.webhooks = webhooks
         self.inputs = list(dict.fromkeys(inputs))
         self.input_aliases = dict(input_aliases or {})
         self.command_listener = command_listener
+        self.controller = controller
         self._clients: set[queue.Queue] = set()
         self._clients_lock = threading.Lock()
         self._static = {
@@ -83,6 +86,8 @@ class WebServer:
         self.httpd.app = self  # type: ignore[attr-defined]
         self._thread: threading.Thread | None = None
         avr.add_listener(self._broadcast)
+        if controller is not None:
+            controller.add_listener(self._broadcast_playback)
 
     @property
     def port(self) -> int:
@@ -95,6 +100,8 @@ class WebServer:
 
     def stop(self) -> None:
         self.avr.remove_listener(self._broadcast)
+        if self.controller is not None:
+            self.controller.remove_listener(self._broadcast_playback)
         self.httpd.shutdown()
         self.httpd.server_close()
         with self._clients_lock:
@@ -113,7 +120,20 @@ class WebServer:
         with self._clients_lock:
             self._clients.discard(client)
 
+    def snapshot(self) -> dict[str, Any]:
+        return self._with_playback(self.avr.snapshot())
+
+    def _with_playback(self, snapshot: dict[str, Any]) -> dict[str, Any]:
+        playback = self.controller.playback_snapshot() if self.controller is not None else {
+            "state": "unknown", "idle_remaining_seconds": None,
+        }
+        return {**snapshot, "playback": playback}
+
+    def _broadcast_playback(self) -> None:
+        self._broadcast(self.avr.snapshot())
+
     def _broadcast(self, snapshot: dict[str, Any]) -> None:
+        snapshot = self._with_playback(snapshot)
         message = json.dumps({"type": "status", **snapshot})
         with self._clients_lock:
             for client in self._clients:
@@ -170,7 +190,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         if path == "/api/ws":
             self._websocket()
         elif path == "/api/status":
-            self._json(200, self.app.avr.snapshot())
+            self._json(200, self.app.snapshot())
         elif path == "/api/inputs":
             self._json(200, {"inputs": self.app.inputs, "aliases": self.app.input_aliases})
         elif match := _ZONE_PATH.fullmatch(path):
@@ -368,7 +388,7 @@ class WebSocketSession:
         reader = threading.Thread(target=self._read_loop, args=(client,), daemon=True)
         reader.start()
         try:
-            self._send_frame(0x1, json.dumps({"type": "status", **self.app.avr.snapshot()}).encode())
+            self._send_frame(0x1, json.dumps({"type": "status", **self.app.snapshot()}).encode())
             while not self.closed.is_set():
                 try:
                     message = client.get(timeout=WS_PING_SECONDS)
