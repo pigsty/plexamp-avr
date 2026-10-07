@@ -379,6 +379,19 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(WebhookStore(self.directory).get(created["id"]), updated)
         self.assertEqual(self.request("POST", "/api/webhooks", hook(favorite="true"))[0], 400)
 
+    def test_display_name_round_trips_via_api(self):
+        status, created = self.request("POST", "/api/webhooks", hook(displayName=" Lights "))
+        self.assertEqual(status, 201)
+        self.assertEqual(created["displayName"], "Lights")
+        path = f"/api/webhooks/{created['id']}"
+        self.assertEqual(self.request("GET", path), (200, created))
+        status, updated = self.request("PUT", path, hook(displayName="New label"))
+        self.assertEqual(status, 200)
+        self.assertEqual(updated["displayName"], "New label")
+        self.assertEqual(self.request("GET", "/api/webhooks"), (200, {"webhooks": [updated]}))
+        self.assertEqual(WebhookStore(self.directory).get(created["id"]), updated)
+        self.assertEqual(self.request("POST", "/api/webhooks", hook(displayName=False))[0], 400)
+
     def test_manual_trigger_calls_only_the_selected_saved_webhook_without_avr_commands(self):
         receiver = Receiver()
         self.addCleanup(receiver.close)

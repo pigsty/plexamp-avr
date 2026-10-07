@@ -22,7 +22,7 @@
     <button type="button" role="tab" id="tab-z2" data-zone="z2" aria-selected="false" aria-controls="zone-panel">Z2</button>
     <button type="button" role="tab" id="tab-z3" data-zone="z3" aria-selected="false" aria-controls="zone-panel">Z3</button>
     <button type="button" role="tab" id="tab-nav" data-view="nav" aria-selected="false" aria-controls="nav-panel">Nav</button>
-    <button type="button" role="tab" id="tab-webhooks" data-view="webhooks" aria-selected="false" aria-controls="webhooks-panel">Webhooks</button>
+    <button type="button" role="tab" id="tab-webhooks" data-view="webhooks" aria-selected="false" aria-controls="webhooks-panel">Hooks</button>
   </nav>
   <main id="zone-panel" role="tabpanel" aria-labelledby="tab-z1">
     <section class="card row">
@@ -48,6 +48,7 @@
     </section>
     <section class="card">
       <h2>Sound Mode</h2>
+      <p id="sound-mode-value" role="status">–</p>
       <div id="sound-modes" class="sound-modes" role="group" aria-label="Sound mode">
         <button type="button" class="sound-mode" data-mode="movie" aria-pressed="false">Movie</button>
         <button type="button" class="sound-mode" data-mode="music" aria-pressed="false">Music</button>
@@ -85,6 +86,8 @@
       <h2 id="webhook-form-title">New webhook</h2>
       <label for="webhook-name">Name</label>
       <input type="text" id="webhook-name" maxlength="100" placeholder="Optional">
+      <label for="webhook-display-name">Display name (favorites)</label>
+      <input type="text" id="webhook-display-name" maxlength="100" placeholder="Optional; defaults to name">
       <label class="check"><input type="checkbox" id="webhook-enabled" checked> Enabled (automatic calls)</label>
       <label class="check"><input type="checkbox" id="webhook-favorite"> Favorite (show on main page)</label>
       <div class="grid">
@@ -141,7 +144,7 @@
     <section id="favorite-webhooks-card" class="card" aria-labelledby="favorite-webhooks-title">
       <h2 id="favorite-webhooks-title">Favorite webhooks</h2>
       <div id="favorite-webhooks" class="favorite-webhooks"></div>
-      <p id="favorite-webhooks-empty" class="muted">Mark favorites in the Webhooks tab to trigger them here.</p>
+      <p id="favorite-webhooks-empty" class="muted">Mark favorites in the Hooks tab to trigger them here.</p>
       <p id="favorite-webhooks-status" role="status" hidden></p>
       <p id="favorite-webhooks-error" class="error" role="alert" hidden></p>
     </section>
