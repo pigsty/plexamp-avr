@@ -104,6 +104,7 @@ function render() {
   if (!state.draggingVolume) $("volume-value").textContent = formatVolume(zone.volume);
   $("mute").setAttribute("aria-pressed", String(zone.muted === true));
   $("mute").textContent = zone.muted ? "Muted" : "Mute";
+  $("sound-mode-value").textContent = zone.sound_mode || "–";
   for (const button of document.querySelectorAll(".sound-mode")) {
     const mode = button.dataset.mode.toUpperCase();
     const activeMode = (zone.sound_mode || "").toUpperCase();
@@ -202,7 +203,7 @@ function renderFavoriteWebhooks() {
   $("favorite-webhooks").replaceChildren(...favorites.map((hook) => {
     const button = document.createElement("button");
     button.type = "button";
-    button.textContent = hook.name || `${hook.zone.toUpperCase()} ${hook.event} ${hook.value || "any"}`;
+    button.textContent = webhookDisplayName(hook);
     button.disabled = !state.socketOpen || webhooks.pending.has(hook.id);
     button.addEventListener("click", () => triggerWebhook(hook));
     return button;
@@ -217,7 +218,7 @@ async function triggerWebhook(hook) {
   renderFavoriteWebhooks();
   try {
     await webhookRequest("POST", `api/webhooks/${encodeURIComponent(hook.id)}/trigger`, {});
-    $("favorite-webhooks-status").textContent = `${hook.name || "Webhook"} queued. See server logs for the result.`;
+    $("favorite-webhooks-status").textContent = `${webhookDisplayName(hook)} queued. See server logs for the result.`;
     $("favorite-webhooks-status").hidden = false;
   } catch (error) {
     showFavoriteWebhookError(error.message === "Failed to fetch" ? "Network error" : error.message);
@@ -231,8 +232,14 @@ function describeWebhook(hook) {
   return `${hook.zone.toUpperCase()} ${hook.event} = ${hook.value || "any"} → ${hook.method} ${hook.url}`;
 }
 
+function webhookDisplayName(hook) {
+  return hook.displayName || hook.name || `${hook.zone.toUpperCase()} ${hook.event} ${hook.value || "any"}`;
+}
+
 function renderWebhooks() {
-  const items = webhooks.list.map((hook) => {
+  const sorted = [...webhooks.list].sort((a, b) =>
+    a.zone.localeCompare(b.zone) || a.event.localeCompare(b.event) || a.value.localeCompare(b.value));
+  const items = sorted.map((hook) => {
     const item = document.createElement("li");
     item.classList.toggle("disabled", !hook.enabled);
     const title = document.createElement("h2");
@@ -286,6 +293,7 @@ function editWebhook(hook, duplicate) {
   webhooks.editing = hook && !duplicate ? hook.id : null;
   $("webhook-form-title").textContent = !hook ? "New webhook" : duplicate ? "Duplicate webhook" : "Edit webhook";
   $("webhook-name").value = duplicate && source.name ? `${source.name} (copy)` : source.name;
+  $("webhook-display-name").value = source.displayName || "";
   $("webhook-enabled").checked = source.enabled;
   $("webhook-favorite").checked = Boolean(source.favorite);
   $("webhook-zone").value = source.zone;
@@ -324,6 +332,7 @@ async function saveWebhook(event) {
   }
   const body = {
     name: $("webhook-name").value,
+    displayName: $("webhook-display-name").value,
     enabled: $("webhook-enabled").checked,
     favorite: $("webhook-favorite").checked,
     zone: $("webhook-zone").value,

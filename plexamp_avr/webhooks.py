@@ -72,6 +72,9 @@ def validate_webhook(data: Any) -> dict[str, Any]:
     name = data.get("name", "")
     if not isinstance(name, str) or len(name.strip()) > MAX_NAME_LENGTH:
         raise ValueError(f"name must be a string of at most {MAX_NAME_LENGTH} characters")
+    display_name = data.get("displayName", "")
+    if not isinstance(display_name, str) or len(display_name.strip()) > MAX_NAME_LENGTH:
+        raise ValueError(f"displayName must be a string of at most {MAX_NAME_LENGTH} characters")
     enabled = data.get("enabled", True)
     if not isinstance(enabled, bool):
         raise ValueError("enabled must be true or false")
@@ -140,6 +143,7 @@ def validate_webhook(data: Any) -> dict[str, Any]:
         normalized_headers[header_name] = header_value
     return {
         "name": name.strip(),
+        "displayName": display_name.strip(),
         "enabled": enabled,
         "favorite": favorite,
         "zone": zone,

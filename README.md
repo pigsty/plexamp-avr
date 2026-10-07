@@ -59,17 +59,20 @@ it is preserved on later saves.
 Open `http://<host>:8080/` on a phone or desktop. Tabs Z1, Z2 and Z3 select the
 zone; each zone has power, input, volume (slider and −/+) and mute controls.
 State updates arrive in realtime over a WebSocket.
+The Sound Mode card shows the current AVR sound mode above its buttons.
 The Plexamp tile at the bottom of every tab shows playback state and, while the
 standby timer is active, a live countdown such as “Idle timer 33s remaining…”.
 The countdown reserves space for its digits so updates do not shift the text.
 
-The **Webhooks** tab lists the configured webhooks and lets you add, edit,
+The **Hooks** tab lists the configured webhooks sorted by zone, event and value, and lets you add, edit,
 **duplicate** (opens a pre-filled copy, handy for webhooks with similar URLs)
 and delete them.
 Mark a webhook as **Favorite** when adding or editing it to show a button in the
 **Favorite webhooks** card below Plexamp on every zone page. Tap a button to queue
 a manual call; it does not send an AVR command or require the AVR to be connected.
 The UI confirms when the call is queued; its HTTP result is recorded in the server logs.
+Set an optional **Display name** for a favorite button; otherwise it uses the
+webhook name, or the zone, event and value when no name is set.
 
 On iPhone or iPad, open the web UI in Safari, tap **Share**, then **Add to Home
 Screen**. The app opens without Safari chrome and has a dedicated home-screen
@@ -92,6 +95,7 @@ Each webhook maps an AVR event to an HTTP call:
   custom headers. Existing webhooks without this field continue to work.
 - **Enabled**: controls automatic event calls; disabled webhooks can still be called manually.
 - **Favorite**: shows the webhook on the main page for manual calls (defaults to `false`).
+- **Display name** (`displayName`): optional favorite button label, up to 100 characters.
 
 Webhooks fire for accepted power, input and mute commands sent through the API
 or web UI, even if the AVR does not echo the command, and for independent state
@@ -159,10 +163,10 @@ curl -X POST -H 'Content-Type: application/json' -d '{"power": "on"}' http://loc
 # {"zone": "z2", "command": "Z2ON"}
 ```
 
-Webhook shape (`name`, `enabled`, `favorite`, `body` and `headers` are optional when creating):
+Webhook shape (`name`, `displayName`, `enabled`, `favorite`, `body` and `headers` are optional when creating):
 
 ```json
-{"id": "6b977e6c58cf4d0d85782cc1b26a4bf4", "name": "Z2 CD", "enabled": true, "favorite": false, "zone": "z2",
+{"id": "6b977e6c58cf4d0d85782cc1b26a4bf4", "name": "Z2 CD", "displayName": "CD", "enabled": true, "favorite": false, "zone": "z2",
  "event": "input", "value": "CD", "method": "POST", "url": "http://192.168.1.5/hook", "body": "{\"on\": true}",
  "headers": {"Authorization": "Bearer token"}}
 ```

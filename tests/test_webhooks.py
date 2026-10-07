@@ -57,6 +57,12 @@ class Receiver:
 
 
 class ValidationTests(unittest.TestCase):
+    def test_display_name_is_optional_and_normalized(self):
+        self.assertEqual(validate_webhook(hook())["displayName"], "")
+        self.assertEqual(validate_webhook(hook(displayName="  Lights off  "))["displayName"], "Lights off")
+        self.assertEqual(validate_webhook(hook(displayName=" " * 5))["displayName"], "")
+        self.assertEqual(validate_webhook(hook(displayName="x" * 100))["displayName"], "x" * 100)
+
     def test_normalizes_values(self):
         result = validate_webhook(hook(zone="2", event="input", value=" cd ", method="put", url=" https://h/p ", headers={"X-Test": " yes "}))
         self.assertEqual(result["zone"], "z2")
@@ -88,6 +94,9 @@ class ValidationTests(unittest.TestCase):
             {"favorite": "yes"},
             {"favorite": 1},
             {"favorite": None},
+            {"displayName": None},
+            {"displayName": 1},
+            {"displayName": "x" * 101},
             {"body": 5},
             {"headers": []},
             {"headers": {"Bad Header": "value"}},
@@ -143,12 +152,22 @@ class StoreTests(unittest.TestCase):
         store.update(created["id"], hook(favorite=False))
         self.assertFalse(WebhookStore(self.directory).get(created["id"])["favorite"])
 
+    def test_display_name_persists_and_can_be_updated_or_removed(self):
+        store = WebhookStore(self.directory)
+        created = store.create(hook(displayName="Lights", favorite=True))
+        self.assertEqual(WebhookStore(self.directory).get(created["id"])["displayName"], "Lights")
+        store.update(created["id"], hook(displayName="New label", favorite=True))
+        self.assertEqual(WebhookStore(self.directory).get(created["id"])["displayName"], "New label")
+        store.update(created["id"], hook())
+        self.assertEqual(WebhookStore(self.directory).get(created["id"])["displayName"], "")
+
     def test_legacy_webhooks_default_to_not_favorite(self):
         self.directory.mkdir()
         (self.directory / "webhooks.json").write_text(json.dumps({
             "webhooks": [{"id": "abc", **hook()}],
         }))
         self.assertFalse(WebhookStore(self.directory).get("abc")["favorite"])
+        self.assertEqual(WebhookStore(self.directory).get("abc")["displayName"], "")
 
 
 class EventTests(unittest.TestCase):
@@ -359,6 +378,19 @@ class ApiTests(unittest.TestCase):
         self.assertFalse(updated["favorite"])
         self.assertEqual(WebhookStore(self.directory).get(created["id"]), updated)
         self.assertEqual(self.request("POST", "/api/webhooks", hook(favorite="true"))[0], 400)
+
+    def test_display_name_round_trips_via_api(self):
+        status, created = self.request("POST", "/api/webhooks", hook(displayName=" Lights "))
+        self.assertEqual(status, 201)
+        self.assertEqual(created["displayName"], "Lights")
+        path = f"/api/webhooks/{created['id']}"
+        self.assertEqual(self.request("GET", path), (200, created))
+        status, updated = self.request("PUT", path, hook(displayName="New label"))
+        self.assertEqual(status, 200)
+        self.assertEqual(updated["displayName"], "New label")
+        self.assertEqual(self.request("GET", "/api/webhooks"), (200, {"webhooks": [updated]}))
+        self.assertEqual(WebhookStore(self.directory).get(created["id"]), updated)
+        self.assertEqual(self.request("POST", "/api/webhooks", hook(displayName=False))[0], 400)
 
     def test_manual_trigger_calls_only_the_selected_saved_webhook_without_avr_commands(self):
         receiver = Receiver()
