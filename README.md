@@ -230,5 +230,24 @@ docker build -t plexamp-avr:e2e .
 python3 -m unittest discover -s e2e -v
 ```
 
+### Real-system smoke test
+
+To check input webhooks and saved-volume restore against a real AVR, run the
+opt-in smoke test from a machine that can reach both the API and a callback
+address reachable by the API server:
+
+```sh
+python3 e2e/smoke_test.py http://vault:8090 --confirm
+```
+
+It temporarily creates input/power webhooks and tests only `CD` and `AUX`
+(`AUX` maps to the first configured AUX input). Volume commands are
+capped at 50, and the saved-volume check uses 48. The test removes its
+webhooks and leaves the AVR off; it does not restore the starting input or
+volume, and it updates saved volumes for the tested inputs. Existing webhooks
+still run during the test, so their normal external side effects will occur.
+Use `--inputs` to test only one of those two inputs or `--callback-host` if
+the callback address cannot be auto-detected; pass `--help` for details.
+
 GitHub Actions runs both the unit tests and the Docker end-to-end test on pushes
 and pull requests.
