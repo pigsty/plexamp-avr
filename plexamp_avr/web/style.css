@@ -11,6 +11,8 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
+a { color: var(--accent); }
 
 body {
   margin: 0;
@@ -114,6 +116,9 @@ output { font-variant-numeric: tabular-nums; }
 .playback-footer { padding-bottom: 1rem; }
 .idle-timer { color: var(--muted); margin: 0.5rem 0 0; min-height: 1.5em; }
 .idle-seconds { display: inline-block; min-width: 4ch; text-align: right; font-variant-numeric: tabular-nums; }
+#saved-volumes dl { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.5rem 1rem; }
+#saved-volumes dt { overflow-wrap: anywhere; }
+#saved-volumes dd { margin: 0; font-variant-numeric: tabular-nums; }
 
 .form label { margin-top: 0.75rem; }
 .form input[type="text"], .form input[type="url"], .form textarea {

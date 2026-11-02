@@ -69,7 +69,11 @@ Open `http://<host>:8080/` on a phone or desktop. Tabs Z1, Z2 and Z3 select the
 zone; each zone has power, input, volume (slider and −/+) and mute controls.
 State updates arrive in realtime over a WebSocket.
 The Sound Mode card shows the current AVR sound mode above its buttons.
-The Plexamp tile at the bottom of every tab shows playback state and, while the
+The input shortcut chips show the last four distinct inputs successfully selected
+in this browser tab, most recent first, shared across zones. History survives
+reloads for the browser session and is not shared with other browsers.
+The **Debug** link at the bottom opens a page showing the saved volume levels for
+each zone and input. Its Plexamp tile shows playback state and, while the
 standby timer is active, a live countdown such as “Idle timer 33s remaining…”.
 The countdown reserves space for its digits so updates do not shift the text.
 
@@ -81,7 +85,7 @@ labels (for example `CD` and `NET` tagged `music`), saved as `input_tags.json` i
 `data_dir`. For an input-change webhook, choose **Tag: music** as the value to fire
 whenever the zone switches to any input carrying that tag.
 Mark a webhook as **Favorite** when adding or editing it to show a button in the
-**Favorite webhooks** card below Plexamp on every zone page. Tap a button to queue
+**Favorite webhooks** card on every zone page. Tap a button to queue
 a manual call; it does not send an AVR command or require the AVR to be connected.
 The UI confirms when the call is queued; its HTTP result is recorded in the server logs.
 Set an optional **Display name** for a favorite button; otherwise it uses the
@@ -141,7 +145,7 @@ JSON with `Content-Type: application/json`.
 
 | Method | Path | Description |
 | --- | --- | --- |
-| `GET` | `/api/status` | Connection status, state of all zones and Plexamp playback/idle timer |
+| `GET` | `/api/status` | Connection status, state of all zones, saved volumes per zone/input (`saved_volumes`) and Plexamp playback/idle timer |
 | `GET` | `/api/zones/{zone}` | State of a single zone |
 | `GET` | `/api/inputs` | Inputs offered by the web UI |
 | `POST` | `/api/zones/{zone}/power` | `{"power": "on"}` or `{"power": "off"}` |

@@ -283,6 +283,7 @@ class DenonClient:
             return {
                 "connected": self._connected,
                 "zones": {zone: asdict(state) for zone, state in self._zones.items()},
+                "saved_volumes": {zone: dict(volumes) for zone, volumes in self._volumes.items()},
             }
 
     def _notify(self) -> None:

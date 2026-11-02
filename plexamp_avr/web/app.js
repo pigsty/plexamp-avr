@@ -3,6 +3,27 @@
 const ZONE_NAMES = { z1: "Main zone", z2: "Zone 2", z3: "Zone 3" };
 const state = { zone: "z1", status: null, socketOpen: false, inputs: [], inputAliases: {}, inputTags: {}, draggingVolume: false, idleDeadline: null };
 const $ = (id) => document.getElementById(id);
+const INPUT_HISTORY_KEY = "plexamp-avr-recent-inputs";
+let recentInputs = [];
+try {
+  const saved = JSON.parse(sessionStorage.getItem(INPUT_HISTORY_KEY) || "[]");
+  if (!Array.isArray(saved) || !saved.every((input) => typeof input === "string" && input)) {
+    throw new Error("Invalid input history");
+  }
+  recentInputs = [...new Set(saved)].slice(0, 4);
+} catch (error) {
+  console.warn("Could not load session input shortcuts", error);
+}
+
+function rememberInput(input) {
+  recentInputs = [input, ...recentInputs.filter((name) => name !== input)].slice(0, 4);
+  try {
+    sessionStorage.setItem(INPUT_HISTORY_KEY, JSON.stringify(recentInputs));
+  } catch (error) {
+    console.warn("Could not save session input shortcuts; history will reset on reload", error);
+  }
+  renderInputShortcuts(currentZone(), Boolean(state.socketOpen && state.status && state.status.connected));
+}
 
 function inputLabel(name) {
   const alias = state.inputAliases[name];
@@ -39,12 +60,11 @@ function renderInputs(zone) {
 }
 
 function renderInputShortcuts(zone, avrConnected) {
-  const shortcuts = Object.entries(state.inputAliases)
-    .filter(([inputName, alias]) => alias && inputName)
-    .slice(0, 4);
+  const shortcuts = recentInputs.filter((name) => state.zone !== "z1" || name !== "SOURCE");
   const container = $("input-shortcuts");
   container.hidden = shortcuts.length === 0;
-  container.replaceChildren(...shortcuts.map(([inputName, alias]) => {
+  container.replaceChildren(...shortcuts.map((inputName) => {
+    const alias = state.inputAliases[inputName] || inputName;
     const button = document.createElement("button");
     const label = document.createElement("span");
     button.type = "button";
@@ -84,6 +104,7 @@ function renderPlayback() {
 
 function render() {
   renderPlayback();
+  renderSavedVolumes();
   renderFavoriteWebhooks();
   const avrConnected = Boolean(state.socketOpen && state.status && state.status.connected);
   const connection = $("connection");
@@ -116,6 +137,52 @@ function render() {
     $(id).disabled = !avrConnected;
   }
   for (const button of document.querySelectorAll("#nav-controls button")) button.disabled = !avrConnected;
+}
+
+function renderSavedVolumes() {
+  const container = $("saved-volumes");
+  if ($("debug-panel").hidden) return;
+  if (!state.socketOpen || !state.status) {
+    container.textContent = "Saved volumes unavailable while server is offline.";
+    return;
+  }
+  const saved = state.status.saved_volumes || {};
+  container.replaceChildren(...Object.entries(ZONE_NAMES).map(([zone, name]) => {
+    const section = document.createElement("section");
+    const heading = document.createElement("h3");
+    heading.textContent = name;
+    section.append(heading);
+    const entries = Object.entries(saved[zone] || {}).sort(([a], [b]) => a.localeCompare(b));
+    if (!entries.length) {
+      const empty = document.createElement("p");
+      empty.textContent = "No saved volumes.";
+      section.append(empty);
+    } else {
+      const list = document.createElement("dl");
+      for (const [input, volume] of entries) {
+        const label = document.createElement("dt");
+        const value = document.createElement("dd");
+        label.textContent = inputLabel(input);
+        value.textContent = formatVolume(volume);
+        list.append(label, value);
+      }
+      section.append(list);
+    }
+    return section;
+  }));
+}
+
+function selectPage() {
+  const debug = window.location.hash === "#debug";
+  $("debug-panel").hidden = !debug;
+  $("view-tabs").hidden = debug;
+  $("debug-link").hidden = debug;
+  if (debug) {
+    for (const id of ["zone-panel", "nav-panel", "webhooks-panel"]) $(id).hidden = true;
+    render();
+  } else {
+    selectZone(state.zone);
+  }
 }
 
 function selectZone(zone) {
@@ -589,6 +656,7 @@ async function send(action, body) {
       showError(data.error || `Request failed (${response.status})`);
     } else {
       showError("");
+      if (action === "input") rememberInput(body.input);
     }
   } catch (error) {
     showError("Network error");
@@ -713,7 +781,8 @@ fetch("api/inputs")
   })
   .catch(() => {});
 
-render();
+window.addEventListener("hashchange", selectPage);
+selectPage();
 setInterval(renderPlayback, 250);
 connect();
 
