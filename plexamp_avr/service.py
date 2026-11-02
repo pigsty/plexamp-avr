@@ -125,6 +125,7 @@ def build_controller(config: Config, avr: DenonClient | None = None) -> AvrContr
         avr or DenonClient(
             config.avr_host, config.avr_port, config.request_timeout_seconds,
             data_dir=config.data_dir,
+            max_volume=config.max_volume,
         ),
         config,
     )

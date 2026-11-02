@@ -193,6 +193,55 @@ class VolumeMemoryTests(unittest.TestCase):
         pending = self.client._restores[zone]
         self.client._restore_volume(zone, pending)
 
+    def test_numeric_volume_commands_are_capped_in_all_zones(self):
+        for maximum in (0, 65, 75, 98):
+            self.client.max_volume = maximum
+            for zone, prefix in (("z1", "MV"), ("z2", "Z2"), ("z3", "Z3")):
+                with self.subTest(maximum=maximum, zone=zone):
+                    self.client.send(prefix + "98")
+                    self.assertEqual(self.commands()[-1], prefix + f"{maximum:02d}")
+                    self.client.send(prefix + "00")
+                    self.assertEqual(self.commands()[-1], prefix + "00")
+
+    def test_relative_volume_commands_respect_ceiling_and_zone_step(self):
+        for zone, prefix in (("z1", "MV"), ("z2", "Z2"), ("z3", "Z3")):
+            for current, direction, expected in (
+                (74, "UP", "745" if zone == "z1" else "75"),
+                (75, "UP", "75"),
+                (80, "UP", "75"),
+                (80, "DOWN", "75"),
+                (75, "DOWN", "745" if zone == "z1" else "74"),
+                (0, "DOWN", "00"),
+            ):
+                with self.subTest(zone=zone, current=current, direction=direction):
+                    self.observe(prefix + f"{current:02d}")
+                    self.client.send(prefix + direction)
+                    self.assertEqual(self.commands()[-1], prefix + expected)
+
+    def test_unknown_volume_cannot_be_increased_but_can_be_decreased(self):
+        for prefix in ("MV", "Z2", "Z3"):
+            with self.subTest(prefix=prefix):
+                with self.assertRaisesRegex(ValueError, "current volume"):
+                    self.client.send(prefix + "UP")
+                self.client.send(prefix + "DOWN")
+                self.assertEqual(self.commands()[-1], prefix + "DOWN")
+
+    def test_remembered_volume_above_limit_is_restored_at_limit(self):
+        for zone, input_prefix, volume_prefix in (("z1", "SI", "MV"), ("z2", "Z2", "Z2"), ("z3", "Z3", "Z3")):
+            with self.subTest(zone=zone):
+                self.observe(input_prefix + "CD", volume_prefix + "85", input_prefix + "TV", volume_prefix + "20")
+                self.client.send(input_prefix + "CD")
+                self.observe(input_prefix + "CD")
+                self.assertTrue(self.wait(lambda: self.commands()[-1] == volume_prefix + "75"))
+                self.assertEqual(self.commands()[-1], volume_prefix + "75")
+                self.assertEqual(self.client._restores[zone].restoring, 75)
+                self.observe(volume_prefix + "75")
+                self.assertEqual(self.client._volumes[zone]["CD"], 75)
+
+    def test_set_volume_uses_ceiling(self):
+        self.client.set_volume(85)
+        self.assertEqual(self.commands()[-1], "MV75")
+
     def test_input_timeout_restores_without_blocking_or_reassigning_cached_volume(self):
         self.seed()
         started = time.monotonic()

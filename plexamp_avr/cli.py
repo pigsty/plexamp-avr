@@ -26,6 +26,7 @@ def main() -> None:
     avr = DenonClient(
         config.avr_host, config.avr_port, config.request_timeout_seconds,
         data_dir=config.data_dir,
+        max_volume=config.max_volume,
     )
     webhooks = WebhookStore(config.data_dir)
     tags = TagStore(config.data_dir)
