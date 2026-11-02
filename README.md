@@ -68,6 +68,18 @@ it is preserved on later saves.
 Open `http://<host>:8080/` on a phone or desktop. Tabs Z1, Z2 and Z3 select the
 zone; each zone has power, input, volume (slider and −/+) and mute controls.
 State updates arrive in realtime over a WebSocket.
+
+![Main zone controls](docs/images/main-zone.png)
+
+<details>
+<summary>More views: webhook management and saved volumes</summary>
+
+![Webhook management](docs/images/webhooks.png)
+
+![Debug and saved volumes](docs/images/debug.png)
+
+</details>
+
 The Sound Mode card shows the current AVR sound mode above its buttons.
 The input shortcut chips show the last four distinct inputs successfully selected
 in this browser tab, most recent first, shared across zones. History survives
