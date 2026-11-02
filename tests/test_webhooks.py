@@ -5,7 +5,7 @@ import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
@@ -94,6 +94,13 @@ class ValidationTests(unittest.TestCase):
             {"favorite": "yes"},
             {"favorite": 1},
             {"favorite": None},
+            {"favoriteOrder": -1},
+            {"favoriteOrder": True},
+            {"favoriteOrder": 0.5},
+            {"favoriteWidth": 0},
+            {"favoriteWidth": 3},
+            {"favoriteWidth": True},
+            {"favoriteWidth": "2"},
             {"displayName": None},
             {"displayName": 1},
             {"displayName": "x" * 101},
@@ -168,6 +175,52 @@ class StoreTests(unittest.TestCase):
         }))
         self.assertFalse(WebhookStore(self.directory).get("abc")["favorite"])
         self.assertEqual(WebhookStore(self.directory).get("abc")["displayName"], "")
+        self.assertEqual(WebhookStore(self.directory).get("abc")["favoriteOrder"], 0)
+        self.assertEqual(WebhookStore(self.directory).get("abc")["favoriteWidth"], 1)
+
+    def test_replace_favorites_persists_presentation_and_preserves_actions(self):
+        store = WebhookStore(self.directory)
+        first = store.create(hook(favorite=True))
+        removed = store.create(hook(favorite=True, enabled=False))
+        added = store.create(hook(name="Added", headers={"X-Test": "keep"}))
+        result = store.replace_favorites([
+            {"id": added["id"], "displayName": " New label ", "favoriteWidth": 2},
+            {"id": first["id"], "displayName": "", "favoriteWidth": 1},
+        ])
+        self.assertEqual(WebhookStore(self.directory).list(), result)
+        self.assertEqual(store.get(added["id"]), {
+            **added, "favorite": True, "displayName": "New label", "favoriteWidth": 2,
+        })
+        self.assertEqual(store.get(first["id"])["favoriteOrder"], 1)
+        self.assertEqual(store.get(removed["id"]), {**removed, "favorite": False})
+        store.replace_favorites([])
+        self.assertTrue(all(not item["favorite"] for item in store.list()))
+
+    def test_replace_favorites_rejects_invalid_batches_without_partial_updates(self):
+        store = WebhookStore(self.directory)
+        created = store.create(hook(favorite=True))
+        valid = {"id": created["id"], "displayName": "New", "favoriteWidth": 2}
+        for invalid in (
+            None, {}, [None], [{"id": []}], [valid, valid],
+            [valid, {**valid, "id": "ffff"}],
+            [valid, {"id": created["id"]}],
+            [{**valid, "displayName": "x" * 101}],
+            [{**valid, "favoriteWidth": False}],
+        ):
+            with self.subTest(invalid=invalid):
+                with self.assertRaises(ValueError):
+                    store.replace_favorites(invalid)
+                self.assertEqual(store.list(), [created])
+                self.assertEqual(WebhookStore(self.directory).list(), [created])
+
+    def test_failed_favorite_save_keeps_existing_state(self):
+        store = WebhookStore(self.directory)
+        created = store.create(hook(favorite=True))
+        with patch("plexamp_avr.webhooks._write_json", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                store.replace_favorites([])
+        self.assertEqual(store.list(), [created])
+        self.assertEqual(WebhookStore(self.directory).list(), [created])
 
 
 class EventTests(unittest.TestCase):
@@ -391,6 +444,28 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.request("GET", "/api/webhooks"), (200, {"webhooks": [updated]}))
         self.assertEqual(WebhookStore(self.directory).get(created["id"]), updated)
         self.assertEqual(self.request("POST", "/api/webhooks", hook(displayName=False))[0], 400)
+
+    def test_favorites_api(self):
+        first = self.store.create(hook(favorite=True))
+        second = self.store.create(hook())
+        payload = {"favorites": [
+            {"id": second["id"], "displayName": "Second", "favoriteWidth": 2},
+            {"id": first["id"], "displayName": "First", "favoriteWidth": 1},
+        ]}
+        status, data = self.request("PUT", "/api/webhooks/favorites", payload)
+        self.assertEqual(status, 200)
+        self.assertEqual(data["webhooks"], WebhookStore(self.directory).list())
+        self.assertEqual(self.store.get(first["id"])["favoriteOrder"], 1)
+        self.assertEqual(self.store.get(second["id"])["favoriteWidth"], 2)
+        self.assertEqual(self.request("GET", "/api/webhooks/favorites")[0], 405)
+        self.assertEqual(self.request("POST", "/api/webhooks/favorites", payload)[0], 405)
+        for invalid in ({}, {"favorites": None}, {"favorites": [{"id": "ffff"}]}):
+            self.assertEqual(self.request("PUT", "/api/webhooks/favorites", invalid)[0], 400)
+        with patch.object(self.store, "_save", side_effect=OSError("disk full")):
+            with self.assertLogs("plexamp_avr.web", level="ERROR"):
+                self.assertEqual(self.request("PUT", "/api/webhooks/favorites", payload)[0], 500)
+        self.assertEqual(self.request("PUT", "/api/webhooks/favorites", {"favorites": []})[0], 200)
+        self.assertFalse(any(item["favorite"] for item in self.store.list()))
 
     def test_manual_trigger_calls_only_the_selected_saved_webhook_without_avr_commands(self):
         receiver = Receiver()

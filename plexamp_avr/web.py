@@ -329,6 +329,27 @@ class RequestHandler(BaseHTTPRequestHandler):
             self._trigger_webhook(match[1])
             return
         store = self.app.webhooks
+        if path == "/api/webhooks/favorites" and store is not None:
+            if self.command != "PUT":
+                self._discard_body()
+                self._error(405, "use PUT", {"Allow": "PUT"})
+                return
+            body = self._read_json(MAX_WEBHOOK_BODY_BYTES)
+            if body is _CLOSED:
+                return
+            try:
+                if not isinstance(body, dict) or "favorites" not in body:
+                    raise ValueError("expected a JSON object with a 'favorites' field")
+                webhooks = store.replace_favorites(body["favorites"])
+            except ValueError as err:
+                self._error(400, str(err))
+                return
+            except OSError as err:
+                LOGGER.error("Could not save favorites: %s", err)
+                self._error(500, "could not save favorites")
+                return
+            self._json(200, {"webhooks": webhooks})
+            return
         match = _WEBHOOK_PATH.fullmatch(path)
         if store is None or (path != "/api/webhooks" and match is None):
             self._discard_body()
