@@ -8,7 +8,7 @@ from .config import Config
 from .denon import DenonClient
 from .service import build_controller
 from .web import WebServer
-from .webhooks import WebhookDispatcher, WebhookStore
+from .webhooks import TagStore, WebhookDispatcher, WebhookStore
 
 
 def _configure_logging(debug: bool) -> None:
@@ -28,7 +28,8 @@ def main() -> None:
         data_dir=config.data_dir,
     )
     webhooks = WebhookStore(config.data_dir)
-    dispatcher = WebhookDispatcher(webhooks, config.request_timeout_seconds)
+    tags = TagStore(config.data_dir)
+    dispatcher = WebhookDispatcher(webhooks, config.request_timeout_seconds, tags)
     dispatcher.start()
     avr.add_listener(dispatcher.handle_snapshot)
     avr.start()
@@ -44,6 +45,7 @@ def main() -> None:
             dispatcher.handle_command,
             controller,
             webhook_trigger=dispatcher.trigger_manual,
+            tags=tags,
         ).start()
     controller.run()
 

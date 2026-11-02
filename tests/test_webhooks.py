@@ -10,7 +10,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from plexamp_avr.web import WebServer
-from plexamp_avr.webhooks import WebhookDispatcher, WebhookStore, validate_webhook, zone_events
+from plexamp_avr.webhooks import TagStore, WebhookDispatcher, WebhookStore, validate_webhook, zone_events
 
 
 def hook(**overrides):
@@ -517,3 +517,27 @@ class ApiTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TagTests(unittest.TestCase):
+    def test_tags_persist_and_normalize(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = TagStore(directory)
+            self.assertEqual(store.replace({"cd": ["Music", "music", " tv "], "NET": []}), {"CD": ["music", "tv"]})
+            self.assertEqual(TagStore(directory).tags_for("CD"), ["music", "tv"])
+            for bad in ({"CD": ["bad tag"]}, {"CD": "music"}, {"CD": [1]}):
+                with self.assertRaises(ValueError):
+                    store.replace(bad)
+
+    def test_tag_webhook_matches_tagged_inputs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store, tags = WebhookStore(directory), TagStore(directory)
+            tags.replace({"CD": ["music"], "NET": ["music"], "TV": ["video"]})
+            hook_data = {"zone": "z1", "event": "input", "value": "tag:Music", "url": "http://example.invalid/x"}
+            self.assertEqual(store.create(hook_data)["value"], "tag:music")
+            dispatcher = WebhookDispatcher(store, tags=tags)
+            for input_name in ("CD", "NET", "TV"):
+                dispatcher.trigger("z1", "input", input_name)
+            self.assertEqual([item[0]["value"] for item in list(dispatcher._queue.queue)], ["tag:music"] * 2)
+            with self.assertRaises(ValueError):
+                validate_webhook({**hook_data, "value": "tag:bad tag"})

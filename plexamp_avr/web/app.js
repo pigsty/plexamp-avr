@@ -1,7 +1,7 @@
 "use strict";
 
 const ZONE_NAMES = { z1: "Main zone", z2: "Zone 2", z3: "Zone 3" };
-const state = { zone: "z1", status: null, socketOpen: false, inputs: [], inputAliases: {}, draggingVolume: false, idleDeadline: null };
+const state = { zone: "z1", status: null, socketOpen: false, inputs: [], inputAliases: {}, inputTags: {}, draggingVolume: false, idleDeadline: null };
 const $ = (id) => document.getElementById(id);
 
 function inputLabel(name) {
@@ -228,12 +228,16 @@ async function triggerWebhook(hook) {
   }
 }
 
+function valueLabel(value) {
+  return value.startsWith("tag:") ? `tag ${value.slice(4)}` : value;
+}
+
 function describeWebhook(hook) {
-  return `${hook.zone.toUpperCase()} ${hook.event} = ${hook.value || "any"} → ${hook.method} ${hook.url}`;
+  return `${hook.zone.toUpperCase()} ${hook.event} = ${valueLabel(hook.value) || "any"} → ${hook.method} ${hook.url}`;
 }
 
 function webhookDisplayName(hook) {
-  return hook.displayName || hook.name || `${hook.zone.toUpperCase()} ${hook.event} ${hook.value || "any"}`;
+  return hook.displayName || hook.name || `${hook.zone.toUpperCase()} ${hook.event} ${valueLabel(hook.value) || "any"}`;
 }
 
 function renderWebhooks() {
@@ -273,14 +277,80 @@ function renderValueOptions(selected) {
   if (event === "input") {
     const inputs = [...state.inputs];
     if ($("webhook-zone").value !== "z1" && !inputs.includes("SOURCE")) inputs.unshift("SOURCE");
-    if (selected && !inputs.includes(selected)) inputs.push(selected);
-    options = [new Option("Any input", ""), ...inputs.map((name) => new Option(inputLabel(name), name))];
+    const tags = allTags();
+    if (selected && selected.startsWith("tag:") && !tags.includes(selected.slice(4))) tags.push(selected.slice(4));
+    else if (selected && !selected.startsWith("tag:") && !inputs.includes(selected)) inputs.push(selected);
+    options = [
+      new Option("Any input", ""),
+      ...tags.map((tag) => new Option(`Tag: ${tag}`, `tag:${tag}`)),
+      ...inputs.map((name) => new Option(inputLabel(name), name)),
+    ];
   } else {
     options = [new Option("On", "on"), new Option("Off", "off")];
   }
   $("webhook-value").replaceChildren(...options);
   if (selected !== undefined && [...$("webhook-value").options].some((o) => o.value === selected)) {
     $("webhook-value").value = selected;
+  }
+}
+
+function allTags() {
+  return [...new Set(Object.values(state.inputTags).flat())].sort();
+}
+
+function showTagsMessage(message, isError) {
+  $("tags-error").textContent = isError ? message : "";
+  $("tags-error").hidden = !isError || !message;
+  $("tags-status").textContent = isError ? "" : message;
+  $("tags-status").hidden = isError || !message;
+}
+
+function renderTags() {
+  const names = [...new Set([...state.inputs, ...Object.keys(state.inputTags)])];
+  const rows = names.map((name) => {
+    const row = document.createElement("div");
+    const label = document.createElement("label");
+    const field = document.createElement("input");
+    field.type = "text";
+    field.id = `tags-${name}`;
+    field.dataset.input = name;
+    field.value = (state.inputTags[name] || []).join(", ");
+    field.placeholder = "e.g. music, tv";
+    label.htmlFor = field.id;
+    label.textContent = inputLabel(name);
+    row.append(label, field);
+    return row;
+  });
+  $("tags-list").replaceChildren(...rows);
+  $("tags-card").hidden = names.length === 0;
+}
+
+async function loadTags() {
+  try {
+    const data = await webhookRequest("GET", "api/tags");
+    state.inputTags = data.tags || {};
+  } catch {
+    return;
+  }
+  renderTags();
+  renderValueOptions($("webhook-value").value);
+}
+
+async function saveTags(event) {
+  event.preventDefault();
+  const tags = {};
+  for (const field of $("tags-list").querySelectorAll("input[data-input]")) {
+    const values = field.value.split(",").map((tag) => tag.trim()).filter(Boolean);
+    if (values.length) tags[field.dataset.input] = values;
+  }
+  try {
+    const data = await webhookRequest("PUT", "api/tags", { tags });
+    state.inputTags = data.tags || {};
+    showTagsMessage("Tags saved.", false);
+    renderTags();
+    renderValueOptions($("webhook-value").value);
+  } catch (error) {
+    showTagsMessage(error.message === "Failed to fetch" ? "Network error" : error.message, true);
   }
 }
 
@@ -454,6 +524,7 @@ $("nav-controls").addEventListener("click", (event) => {
 $("webhook-add").addEventListener("click", () => editWebhook(null, false));
 $("webhook-cancel").addEventListener("click", closeWebhookForm);
 $("webhook-form").addEventListener("submit", saveWebhook);
+$("tags-form").addEventListener("submit", saveTags);
 $("webhook-event").addEventListener("change", () => renderValueOptions());
 $("webhook-zone").addEventListener("change", () => renderValueOptions($("webhook-value").value));
 $("webhook-method").addEventListener("change", renderBodyField);
@@ -482,8 +553,10 @@ fetch("api/inputs")
   .then((data) => {
     state.inputs = data.inputs || [];
     state.inputAliases = data.aliases || {};
+    renderTags();
     renderValueOptions($("webhook-value").value);
     render();
+    loadTags();
   })
   .catch(() => {});
 

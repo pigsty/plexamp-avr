@@ -1,6 +1,6 @@
 "use strict";
 
-const CACHE_NAME = "plexamp-avr-shell-v5";
+const CACHE_NAME = "plexamp-avr-shell-v6";
 const APP_SHELL = [
   "/",
   "/index.html",
