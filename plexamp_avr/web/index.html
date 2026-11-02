@@ -17,7 +17,7 @@
     <h1>Plexamp AVR</h1>
     <span id="connection" class="status" role="status">Connecting…</span>
   </header>
-  <nav class="tabs" role="tablist" aria-label="Zones">
+  <nav id="view-tabs" class="tabs" role="tablist" aria-label="Zones">
     <button type="button" role="tab" id="tab-z1" data-zone="z1" aria-selected="true" aria-controls="zone-panel">Z1</button>
     <button type="button" role="tab" id="tab-z2" data-zone="z2" aria-selected="false" aria-controls="zone-panel">Z2</button>
     <button type="button" role="tab" id="tab-z3" data-zone="z3" aria-selected="false" aria-controls="zone-panel">Z3</button>
@@ -143,7 +143,11 @@
     <p id="webhook-empty" class="muted" hidden>No webhooks configured.</p>
     <p id="webhook-error" class="error" role="alert" hidden></p>
   </main>
-  <footer class="playback-footer">
+  <main id="debug-panel" hidden>
+    <section class="card row">
+      <h2>Debug</h2>
+      <a href="#">Back to controls</a>
+    </section>
     <section class="card" aria-labelledby="playback-title">
       <div class="row">
         <h2 id="playback-title">Plexamp</h2>
@@ -151,6 +155,12 @@
       </div>
       <p id="idle-timer" class="idle-timer">Idle timer inactive</p>
     </section>
+    <section class="card" aria-labelledby="saved-volumes-title">
+      <h2 id="saved-volumes-title">Saved volume levels per input</h2>
+      <div id="saved-volumes"></div>
+    </section>
+  </main>
+  <footer class="playback-footer">
     <section id="favorite-webhooks-card" class="card" aria-labelledby="favorite-webhooks-title">
       <div class="row">
         <h2 id="favorite-webhooks-title">Favorite webhooks</h2>
@@ -172,6 +182,7 @@
       <p id="favorite-webhooks-status" role="status" hidden></p>
       <p id="favorite-webhooks-error" class="error" role="alert" hidden></p>
     </section>
+    <p id="debug-link" class="muted"><a href="#debug">Debug</a></p>
   </footer>
   <script src="app.js"></script>
 </body>

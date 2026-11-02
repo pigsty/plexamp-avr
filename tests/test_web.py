@@ -111,6 +111,18 @@ class VolumeLimitApiTests(unittest.TestCase):
         self.assertIn("current volume", json.load(caught.exception)["error"])
         self.avr._socket.sendall.assert_not_called()
 
+    def test_saved_volumes_are_exposed_in_api_and_status_stream(self):
+        self.avr._handle_line("SICD")
+        self.avr._handle_line("MV455")
+        with urlopen(f"http://127.0.0.1:{self.server.port}/api/status", timeout=5) as response:
+            self.assertEqual(json.load(response)["saved_volumes"],
+                             {"z1": {"CD": 45.5}, "z2": {}, "z3": {}})
+        client = self.server.register()
+        self.addCleanup(self.server.unregister, client)
+        self.avr._handle_line("MV50")
+        message = json.loads(client.get(timeout=1))
+        self.assertEqual(message["saved_volumes"]["z1"], {"CD": 50})
+
 
 if __name__ == "__main__":
     unittest.main()

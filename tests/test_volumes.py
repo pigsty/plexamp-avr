@@ -103,6 +103,17 @@ class VolumePersistenceTests(unittest.TestCase):
             client._handle_line("MV40")
         self.assertEqual(client._volumes["z1"]["CD"], 40)
 
+    def test_snapshot_exposes_independent_copy_of_saved_volumes(self):
+        client = DenonClient("unused", data_dir=self.directory)
+        for line in ("SICD", "MV455", "Z2TV", "Z230"):
+            client._handle_line(line)
+        saved = client.snapshot()["saved_volumes"]
+        self.assertEqual(saved, {"z1": {"CD": 45.5}, "z2": {"TV": 30}, "z3": {}})
+        saved["z1"]["CD"] = 0
+        self.assertEqual(client.snapshot()["saved_volumes"]["z1"]["CD"], 45.5)
+        reloaded = DenonClient("unused", data_dir=self.directory)
+        self.assertEqual(reloaded.snapshot()["saved_volumes"], client.snapshot()["saved_volumes"])
+
     def test_concurrent_event_updates_produce_valid_complete_json(self):
         client = DenonClient("unused", data_dir=self.directory)
         for line in ("SICD", "Z2CD", "Z3CD"):
