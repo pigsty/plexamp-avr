@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import configparser
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -26,6 +27,11 @@ class Config:
     avr_inputs: tuple[str, ...] = DEFAULT_INPUTS
     avr_input_aliases: tuple[tuple[str, str], ...] = ()
     data_dir: str = "/data"
+    max_volume: int = 75
+
+    def __post_init__(self) -> None:
+        if isinstance(self.max_volume, bool) or not isinstance(self.max_volume, int) or not 0 <= self.max_volume <= 98:
+            raise ValueError("MAX_VOLUME must be an integer between 0 and 98")
 
     @classmethod
     def from_file(cls, path: str | Path) -> "Config":
@@ -60,4 +66,5 @@ class Config:
             avr_inputs=inputs or DEFAULT_INPUTS,
             avr_input_aliases=tuple(input_aliases),
             data_dir=values.get("data_dir", "").strip() or cls.data_dir,
+            max_volume=int(os.environ.get("MAX_VOLUME", cls.max_volume)),
         )

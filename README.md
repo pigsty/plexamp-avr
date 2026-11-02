@@ -39,6 +39,15 @@ power-off or manual volume command cancels an outstanding restore.
 Volumes are saved as `volumes.json` in `data_dir` and survive service restarts.
 The old `preset_volume` setting is no longer used and can be removed.
 
+Set the `MAX_VOLUME` environment variable to an integer from 0 to 98 (default
+`75`) to cap app-controlled volume for all zones, including API commands,
+the +/- buttons and remembered-volume restores. For Compose, for example,
+run `MAX_VOLUME=65 docker compose up -d`; with `docker run`, add `-e MAX_VOLUME=65`.
+The slider retains its full range while dragging and snaps to the limit on
+release. AVR-reported volume is still displayed as-is; changes made on the
+receiver itself are not limited. Increasing volume requires a known current
+volume; otherwise the API returns `400`.
+
 Web UI/API settings: `web_enabled` (default `true`), `web_host` (default `0.0.0.0`),
 `web_port` (default `8080`), `avr_inputs`, a comma-separated list of inputs
 offered in the web UI (defaults to common Denon sources), and optional
@@ -137,7 +146,7 @@ JSON with `Content-Type: application/json`.
 | `GET` | `/api/inputs` | Inputs offered by the web UI |
 | `POST` | `/api/zones/{zone}/power` | `{"power": "on"}` or `{"power": "off"}` |
 | `POST` | `/api/zones/{zone}/input` | `{"input": "CD"}` (Denon source name; `SOURCE` follows the main zone in Z2/Z3) |
-| `POST` | `/api/zones/{zone}/volume` | `{"volume": 45.5}` (0–98, half steps on Z1, whole steps on Z2/Z3) or `{"volume": "up"}` / `{"volume": "down"}` |
+| `POST` | `/api/zones/{zone}/volume` | `{"volume": 45.5}` (0–98, capped at `MAX_VOLUME`, half steps on Z1, whole steps on Z2/Z3) or `{"volume": "up"}` / `{"volume": "down"}` |
 | `POST` | `/api/zones/{zone}/mute` | `{"muted": true}` or `{"muted": false}` |
 | `GET` | `/api/webhooks` | `{"webhooks": [...]}` |
 | `POST` | `/api/webhooks` | Create a webhook (`201`) |
@@ -154,6 +163,7 @@ Status shape (`volume` uses Denon's 0–98 scale, where 80 is 0 dB; fields are
 ```json
 {
   "connected": true,
+  "max_volume": 75,
   "playback": {"state": "paused", "idle_remaining_seconds": 33.0},
   "zones": {
     "z1": {"power": "on", "input": "MPLAY", "volume": 45.5, "muted": false},
@@ -164,6 +174,7 @@ Status shape (`volume` uses Denon's 0–98 scale, where 80 is 0 dB; fields are
 ```
 
 `GET /api/zones/{zone}` returns `{"zone": "z1", "connected": true, "power": ..., "input": ..., "volume": ..., "muted": ...}`.
+Status responses and WebSocket messages include the configured `max_volume`.
 `playback.state` is `unknown` until Plexamp reports a state or when polling fails.
 `idle_remaining_seconds` is `null` when no idle timer is active, otherwise the
 non-negative seconds remaining. Playback updates do not change the existing
@@ -202,7 +213,7 @@ status and then a message whenever the state or AVR connection changes,
 including changes made on the AVR itself or by another client:
 
 ```json
-{"type": "status", "connected": true, "playback": {"state": "paused", "idle_remaining_seconds": 33.0}, "zones": {"z1": {...}, "z2": {...}, "z3": {...}}}
+{"type": "status", "connected": true, "max_volume": 75, "playback": {"state": "paused", "idle_remaining_seconds": 33.0}, "zones": {"z1": {...}, "z2": {...}, "z3": {...}}}
 ```
 
 Messages sent by the client are ignored; the server sends periodic pings.

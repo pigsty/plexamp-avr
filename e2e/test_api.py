@@ -163,7 +163,9 @@ class ApiTests(unittest.TestCase):
                     ("power", {"power": "on"}, f"{prefix}ON", {"power": "on"}),
                     ("input", {"input": "cd"}, f"{input_prefix}CD", {"input": "CD"}),
                     ("volume", {"volume": volume}, f"{volume_prefix}{volume_arg}", {"volume": volume}),
-                    ("volume", {"volume": "up"}, f"{volume_prefix}UP", {}),
+                    ("volume", {"volume": "up"},
+                     self.volume_command(volume_prefix, volume + (0.5 if zone == "z1" else 1)),
+                     {"volume": volume + (0.5 if zone == "z1" else 1)}),
                     ("mute", {"muted": True}, f"{mute_prefix}ON", {"muted": True}),
                     ("mute", {"muted": False}, f"{mute_prefix}OFF", {"muted": False}),
                 )

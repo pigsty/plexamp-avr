@@ -692,7 +692,10 @@ $("volume").addEventListener("input", (event) => {
 });
 $("volume").addEventListener("change", (event) => {
   state.draggingVolume = false;
-  send("volume", { volume: Number(event.target.value) });
+  const volume = Math.min(Number(event.target.value), state.status.max_volume);
+  event.target.value = volume;
+  $("volume-value").textContent = formatVolume(volume);
+  send("volume", { volume });
 });
 $("volume-down").addEventListener("click", () => send("volume", { volume: "down" }));
 $("volume-up").addEventListener("click", () => send("volume", { volume: "up" }));

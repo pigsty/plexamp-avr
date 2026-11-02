@@ -141,7 +141,7 @@ class WebServer:
         playback = self.controller.playback_snapshot() if self.controller is not None else {
             "state": "unknown", "idle_remaining_seconds": None,
         }
-        return {**self.avr.snapshot(), "playback": playback}
+        return {**self.avr.snapshot(), "playback": playback, "max_volume": self.avr.max_volume}
 
     def _broadcast_playback(self) -> None:
         self._broadcast()
@@ -266,6 +266,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             return
         try:
             command = build_zone_command(zone, action, body[field])
+            if action == "volume":
+                command = self.app.avr.limit_volume_command(command)
         except ValueError as err:
             self._error(400, str(err))
             return

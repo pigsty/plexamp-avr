@@ -8,6 +8,7 @@ services:
     network_mode: host
     environment:
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      MAX_VOLUME: ${MAX_VOLUME:-75}
     volumes:
       - /etc/plexamp-avr.conf:/etc/plexamp-avr.conf:ro
       - ./data:/data

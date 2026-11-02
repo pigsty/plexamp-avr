@@ -139,7 +139,11 @@ class DenonClient:
         reconnect_delay: float = 2.0,
         keepalive_seconds: float = 30.0,
         data_dir: str | Path | None = None,
+        max_volume: int = 75,
     ):
+        if isinstance(max_volume, bool) or not isinstance(max_volume, int) or not 0 <= max_volume <= 98:
+            raise ValueError("max_volume must be an integer between 0 and 98")
+        self.max_volume = max_volume
         self.address = address
         self.port = port
         self.timeout = timeout
@@ -496,6 +500,7 @@ class DenonClient:
                 if volume is None:
                     self._cancel_restore(zone)
                     return
+                volume = min(volume, self.max_volume)
                 sock = self._socket
                 if sock is None:
                     self._cancel_restore(zone)
@@ -558,10 +563,30 @@ class DenonClient:
     def send(self, command: str) -> bool:
         return self._send(command)
 
+    def limit_volume_command(self, command: str) -> str:
+        prefix, value = command[:2], command[2:]
+        if prefix not in {"MV", "Z2", "Z3"}:
+            return command
+        volume = parse_volume(value)
+        zone = "z1" if prefix == "MV" else prefix.lower()
+        if value in {"UP", "DOWN"}:
+            with self._condition:
+                current = self._zones[zone].volume
+            if current is None:
+                if value == "DOWN":
+                    return command
+                raise ValueError("cannot increase volume until the AVR reports its current volume")
+            step = 0.5 if zone == "z1" else 1
+            volume = max(0, current + (step if value == "UP" else -step))
+        elif volume is None:
+            return command
+        return build_zone_command(zone, "volume", min(volume, self.max_volume))
+
     def _send(self, command: str, suppress_power_restore: bool = False) -> bool:
         """Send a raw command over the persistent connection."""
         if "\r" in command or "\n" in command:
             raise ValueError("command must not contain line breaks")
+        command = self.limit_volume_command(command)
         payload = (command + "\r").encode("ascii")
         if not self.wait_connected(self.timeout):
             LOGGER.warning("Denon Telnet command %r failed: not connected", command)
