@@ -30,6 +30,12 @@ MAX_BODY_LENGTH = 16384
 MAX_HEADERS = 50
 MAX_HEADER_VALUE_LENGTH = 8192
 WEBHOOKS_FILE = "webhooks.json"
+TAGS_FILE = "input_tags.json"
+TAG_PREFIX = "tag:"
+MAX_TAG_LENGTH = 32
+MAX_TAGS_PER_INPUT = 20
+MAX_TAGGED_INPUTS = 100
+_TAG_PATTERN = re.compile(r"[a-z0-9][a-z0-9_-]*")
 COMMAND_EVENT_DEDUPE_SECONDS = 2.0
 _ID_PATTERN = re.compile(r"[0-9a-f]{1,64}")
 _HEADER_NAME = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+")
@@ -65,6 +71,32 @@ def _redact_url(url: str) -> str:
     return urlunsplit((parts.scheme, netloc, parts.path, parts.query, ""))
 
 
+def normalize_tag(tag: Any) -> str:
+    if not isinstance(tag, str):
+        raise ValueError("tags must be strings")
+    value = tag.strip().lower()
+    if len(value) > MAX_TAG_LENGTH or not _TAG_PATTERN.fullmatch(value):
+        raise ValueError(
+            f"tags must be 1-{MAX_TAG_LENGTH} characters of letters, digits, '-' or '_'"
+        )
+    return value
+
+
+def validate_tags(data: Any) -> dict[str, list[str]]:
+    """Validate and normalize an {input: [tag, ...]} mapping; empty entries are dropped."""
+    if not isinstance(data, dict) or len(data) > MAX_TAGGED_INPUTS:
+        raise ValueError("tags must be an object mapping inputs to lists of tags")
+    result: dict[str, list[str]] = {}
+    for input_name, tags in data.items():
+        name = normalize_input(input_name)
+        if not isinstance(tags, list) or len(tags) > MAX_TAGS_PER_INPUT:
+            raise ValueError(f"tags for {name} must be a list of at most {MAX_TAGS_PER_INPUT} tags")
+        normalized = sorted({normalize_tag(tag) for tag in tags})
+        if normalized:
+            result[name] = normalized
+    return result
+
+
 def validate_webhook(data: Any) -> dict[str, Any]:
     """Validate and normalize a webhook definition (without its id)."""
     if not isinstance(data, dict):
@@ -91,6 +123,8 @@ def validate_webhook(data: Any) -> dict[str, Any]:
     if event == "input":
         if value is None or (isinstance(value, str) and not value.strip()):
             value = ""
+        elif isinstance(value, str) and value.strip().lower().startswith(TAG_PREFIX):
+            value = TAG_PREFIX + normalize_tag(value.strip()[len(TAG_PREFIX):])
         else:
             value = normalize_input(value)
     else:
@@ -156,8 +190,65 @@ def validate_webhook(data: Any) -> dict[str, Any]:
     }
 
 
+def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # Config files may contain tokens: keep new files private, but preserve
+    # the mode of an existing file so it can be relaxed on the host.
+    try:
+        mode = path.stat().st_mode & 0o777
+    except FileNotFoundError:
+        mode = 0o600
+    fd, temporary = tempfile.mkstemp(dir=path.parent, prefix=f".{path.stem}-", suffix=".json")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            os.fchmod(handle.fileno(), mode)
+            json.dump(payload, handle, indent=2)
+            handle.write("\n")
+        os.replace(temporary, path)
+    except BaseException:
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+        raise
+
+
 def describe_event(zone: str, event: str, value: str) -> str:
     return f"{zone.upper()} {event} {value or 'any'}"
+
+
+class TagStore:
+    """Persists user-defined input tags as JSON in the config store directory."""
+
+    def __init__(self, directory: str | Path):
+        self.path = Path(directory) / TAGS_FILE
+        self._lock = threading.Lock()
+        self._tags: dict[str, list[str]] = self._load()
+
+    def _load(self) -> dict[str, list[str]]:
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+            return validate_tags(data.get("tags", {}) if isinstance(data, dict) else {})
+        except FileNotFoundError:
+            return {}
+        except (OSError, ValueError) as err:
+            LOGGER.error("Could not read input tags from %s: %s", self.path, err)
+            return {}
+
+    def all(self) -> dict[str, list[str]]:
+        with self._lock:
+            return {name: list(tags) for name, tags in self._tags.items()}
+
+    def tags_for(self, input_name: str) -> list[str]:
+        with self._lock:
+            return list(self._tags.get(input_name, []))
+
+    def replace(self, data: Any) -> dict[str, list[str]]:
+        tags = validate_tags(data)
+        with self._lock:
+            _write_json(self.path, {"tags": tags})
+            self._tags = tags
+        return {name: list(values) for name, values in tags.items()}
 
 
 class WebhookStore:
@@ -194,26 +285,7 @@ class WebhookStore:
         return webhooks
 
     def _save(self, webhooks: list[dict[str, Any]]) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        # Webhook URLs may contain tokens: keep new files private, but preserve
-        # the mode of an existing file so it can be relaxed on the host.
-        try:
-            mode = self.path.stat().st_mode & 0o777
-        except FileNotFoundError:
-            mode = 0o600
-        fd, temporary = tempfile.mkstemp(dir=self.path.parent, prefix=".webhooks-", suffix=".json")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                os.fchmod(handle.fileno(), mode)
-                json.dump({"webhooks": webhooks}, handle, indent=2)
-                handle.write("\n")
-            os.replace(temporary, self.path)
-        except BaseException:
-            try:
-                os.unlink(temporary)
-            except OSError:
-                pass
-            raise
+        _write_json(self.path, {"webhooks": webhooks})
 
     def list(self) -> list[dict[str, Any]]:
         with self._lock:
@@ -276,8 +348,9 @@ def zone_events(previous: dict[str, Any], current: dict[str, Any]) -> list[tuple
 class WebhookDispatcher:
     """Listens for AVR state changes and calls matching webhooks in the background."""
 
-    def __init__(self, store: WebhookStore, timeout: float = 5.0):
+    def __init__(self, store: WebhookStore, timeout: float = 5.0, tags: TagStore | None = None):
         self.store = store
+        self.tags = tags
         self.timeout = timeout
         self._previous: dict[str, Any] | None = None
         self._observed_events: dict[tuple[str, str, str], float] = {}
@@ -333,7 +406,11 @@ class WebhookDispatcher:
         for webhook in self.store.list():
             if not webhook["enabled"] or webhook["zone"] != zone or webhook["event"] != event:
                 continue
-            if webhook["value"] and webhook["value"] != value:
+            expected = webhook["value"]
+            if expected.startswith(TAG_PREFIX):
+                if self.tags is None or expected[len(TAG_PREFIX):] not in self.tags.tags_for(value):
+                    continue
+            elif expected and expected != value:
                 continue
             try:
                 self._queue.put_nowait((webhook, describe_event(zone, event, value)))

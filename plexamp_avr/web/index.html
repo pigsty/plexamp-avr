@@ -129,6 +129,16 @@
         <button type="submit" id="webhook-save" class="primary">Save</button>
       </div>
     </form>
+    <section id="tags-card" class="card">
+      <h2>Input tags</h2>
+      <p class="muted">Comma-separated tags per input; webhooks can match "input tag is …".</p>
+      <form id="tags-form" class="form">
+        <div id="tags-list"></div>
+        <button type="submit" id="tags-save" class="primary">Save tags</button>
+      </form>
+      <p id="tags-status" role="status" hidden></p>
+      <p id="tags-error" class="error" role="alert" hidden></p>
+    </section>
     <ul id="webhook-list" class="webhooks"></ul>
     <p id="webhook-empty" class="muted" hidden>No webhooks configured.</p>
     <p id="webhook-error" class="error" role="alert" hidden></p>

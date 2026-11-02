@@ -16,7 +16,7 @@ from urllib.parse import urlsplit
 
 from .denon import DenonClient, build_zone_command, normalize_zone
 from .service import AvrController
-from .webhooks import WebhookStore
+from .webhooks import TagStore, WebhookStore
 
 LOGGER = logging.getLogger(__name__)
 
@@ -82,9 +82,11 @@ class WebServer:
         command_listener: Callable[[str, str, str], None] | None = None,
         controller: AvrController | None = None,
         webhook_trigger: Callable[[dict[str, Any]], bool] | None = None,
+        tags: TagStore | None = None,
     ):
         self.avr = avr
         self.webhooks = webhooks
+        self.tags = tags
         self.inputs = list(dict.fromkeys(inputs))
         self.input_aliases = dict(input_aliases or {})
         self.command_listener = command_listener
@@ -204,6 +206,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             self._json(200, self.app.snapshot())
         elif path == "/api/inputs":
             self._json(200, {"inputs": self.app.inputs, "aliases": self.app.input_aliases})
+        elif path == "/api/tags":
+            self._tags()
         elif match := _ZONE_PATH.fullmatch(path):
             zone = normalize_zone(match[1])
             if zone is None:
@@ -223,6 +227,9 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urlsplit(self.path).path
+        if path == "/api/tags":
+            self._tags()
+            return
         if path.startswith("/api/webhooks"):
             self._webhooks(path)
             return
@@ -276,10 +283,45 @@ class RequestHandler(BaseHTTPRequestHandler):
         self._json(202, {"zone": zone, "command": command})
 
     def do_PUT(self) -> None:
-        self._webhooks(urlsplit(self.path).path)
+        path = urlsplit(self.path).path
+        if path == "/api/tags":
+            self._tags()
+        else:
+            self._webhooks(path)
 
     def do_DELETE(self) -> None:
         self._webhooks(urlsplit(self.path).path)
+
+    def _tags(self) -> None:
+        """Handle the input tag API (GET /api/tags, PUT /api/tags with {"tags": {INPUT: [tag, ...]}})."""
+        store = self.app.tags
+        if store is None:
+            self._discard_body()
+            self._error(404, "not found")
+            return
+        method = "GET" if self.command == "HEAD" else self.command
+        if method == "GET":
+            self._json(200, {"tags": store.all()})
+            return
+        if method != "PUT":
+            self._discard_body()
+            self._error(405, "use GET, PUT", {"Allow": "GET, PUT"})
+            return
+        body = self._read_json(MAX_WEBHOOK_BODY_BYTES)
+        if body is _CLOSED:
+            return
+        try:
+            if not isinstance(body, dict) or "tags" not in body:
+                raise ValueError("expected a JSON object with a 'tags' field")
+            tags = store.replace(body["tags"])
+        except ValueError as err:
+            self._error(400, str(err))
+            return
+        except OSError as err:
+            LOGGER.error("Could not save input tags: %s", err)
+            self._error(500, "could not save input tags")
+            return
+        self._json(200, {"tags": tags})
 
     def _webhooks(self, path: str) -> None:
         """Handle the webhook config API (GET/POST /api/webhooks, GET/PUT/DELETE /api/webhooks/{id})."""

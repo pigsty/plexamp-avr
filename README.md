@@ -67,6 +67,10 @@ The countdown reserves space for its digits so updates do not shift the text.
 The **Hooks** tab lists the configured webhooks sorted by zone, event and value, and lets you add, edit,
 **duplicate** (opens a pre-filled copy, handy for webhooks with similar URLs)
 and delete them.
+The **Input tags** card on the Hooks tab lets you tag inputs with comma-separated
+labels (for example `CD` and `NET` tagged `music`), saved as `input_tags.json` in
+`data_dir`. For an input-change webhook, choose **Tag: music** as the value to fire
+whenever the zone switches to any input carrying that tag.
 Mark a webhook as **Favorite** when adding or editing it to show a button in the
 **Favorite webhooks** card below Plexamp on every zone page. Tap a button to queue
 a manual call; it does not send an AVR command or require the AVR to be connected.
