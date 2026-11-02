@@ -77,6 +77,12 @@ a manual call; it does not send an AVR command or require the AVR to be connecte
 The UI confirms when the call is queued; its HTTP result is recorded in the server logs.
 Set an optional **Display name** for a favorite button; otherwise it uses the
 webhook name, or the zone, event and value when no name is set.
+Tap **Edit** on the Favorites card to drag hooks into order (or use **Move up/down**),
+change display names, and choose a half-row or full-row width for each button.
+Add existing hooks with the picker or **Remove** them from favorites without deleting
+the hook or changing its automatic actions. **Save favorites** persists the layout
+in `webhooks.json` for all browsers and zone pages; **Cancel** discards your edits.
+Create new hook definitions in the Hooks tab.
 
 On iPhone or iPad, open the web UI in Safari, tap **Share**, then **Add to Home
 Screen**. The app opens without Safari chrome and has a dedicated home-screen
@@ -100,6 +106,8 @@ Each webhook maps an AVR event to an HTTP call:
 - **Enabled**: controls automatic event calls; disabled webhooks can still be called manually.
 - **Favorite**: shows the webhook on the main page for manual calls (defaults to `false`).
 - **Display name** (`displayName`): optional favorite button label, up to 100 characters.
+- **Favorite order** (`favoriteOrder`): non-negative integer, defaults to `0`; ties retain creation order.
+- **Favorite width** (`favoriteWidth`): `1` for half a row (default), `2` for a full row.
 
 Webhooks fire for accepted power, input and mute commands sent through the API
 or web UI, even if the AVR does not echo the command, and for independent state
@@ -133,6 +141,7 @@ JSON with `Content-Type: application/json`.
 | `POST` | `/api/zones/{zone}/mute` | `{"muted": true}` or `{"muted": false}` |
 | `GET` | `/api/webhooks` | `{"webhooks": [...]}` |
 | `POST` | `/api/webhooks` | Create a webhook (`201`) |
+| `PUT` | `/api/webhooks/favorites` | Atomically replace favorites with `{"favorites": [{"id": "...", "displayName": "Lights", "favoriteWidth": 2}]}` in display order; omitted hooks are unfavorited, not deleted. Returns `{"webhooks": [...]}` |
 | `GET` | `/api/webhooks/{id}` | A single webhook |
 | `PUT` | `/api/webhooks/{id}` | Replace a webhook |
 | `DELETE` | `/api/webhooks/{id}` | Delete a webhook |

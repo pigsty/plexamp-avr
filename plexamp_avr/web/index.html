@@ -152,8 +152,22 @@
       <p id="idle-timer" class="idle-timer">Idle timer inactive</p>
     </section>
     <section id="favorite-webhooks-card" class="card" aria-labelledby="favorite-webhooks-title">
-      <h2 id="favorite-webhooks-title">Favorite webhooks</h2>
+      <div class="row">
+        <h2 id="favorite-webhooks-title">Favorite webhooks</h2>
+        <button type="button" id="favorites-edit" aria-expanded="false" aria-controls="favorites-editor">Edit</button>
+      </div>
       <div id="favorite-webhooks" class="favorite-webhooks"></div>
+      <form id="favorites-editor" class="form" hidden>
+        <p class="muted">Drag a handle to reorder, or use the move buttons. Full-width buttons occupy their own row.</p>
+        <div id="favorites-items" class="favorite-webhooks"></div>
+        <label for="favorites-add-hook">Add an existing hook</label>
+        <select id="favorites-add-hook"></select>
+        <button type="button" id="favorites-add" class="wide">Add to favorites</button>
+        <div class="actions">
+          <button type="submit" class="primary">Save favorites</button>
+          <button type="button" id="favorites-cancel">Cancel</button>
+        </div>
+      </form>
       <p id="favorite-webhooks-empty" class="muted">Mark favorites in the Hooks tab to trigger them here.</p>
       <p id="favorite-webhooks-status" role="status" hidden></p>
       <p id="favorite-webhooks-error" class="error" role="alert" hidden></p>

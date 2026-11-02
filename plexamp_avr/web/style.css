@@ -133,6 +133,13 @@ output { font-variant-numeric: tabular-nums; }
 .webhooks .actions { grid-template-columns: repeat(3, 1fr); }
 .favorite-webhooks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; margin-top: 1rem; }
 .favorite-webhooks button { padding: 0.5rem; background: var(--bg); overflow-wrap: anywhere; }
+.favorite-webhooks[hidden] { display: none; }
+.favorite-full-width { grid-column: 1 / -1; }
+.favorite-editor-item { min-width: 0; border: 1px solid #333842; border-radius: 0.75rem; padding: 0.5rem; }
+.favorite-editor-item.drop-target { outline: 2px solid var(--accent); }
+.favorite-editor-item .favorite-drag { width: 100%; touch-action: none; cursor: grab; }
+.favorite-editor-item input { min-width: 0; }
+.favorite-editor-item .actions { gap: 0.25rem; margin-top: 0.5rem; }
 
 @media (min-width: 48rem) {
   .bar { padding-top: 2rem; }

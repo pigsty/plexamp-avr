@@ -157,7 +157,12 @@ function selectNavigation() {
 
 // Webhooks ------------------------------------------------------------------
 
-const webhooks = { list: [], editing: null, pending: new Set() };
+const webhooks = { list: [], editing: null, pending: new Set(), favoritesDraft: null };
+
+function favoriteWebhooks() {
+  return webhooks.list.filter((hook) => hook.favorite)
+    .sort((a, b) => a.favoriteOrder - b.favoriteOrder);
+}
 
 function showWebhookError(message) {
   $("webhook-error").textContent = message;
@@ -198,16 +203,150 @@ function showFavoriteWebhookError(message) {
 
 function renderFavoriteWebhooks() {
   $("favorite-webhooks-card").hidden = $("zone-panel").hidden;
-  const favorites = webhooks.list.filter((hook) => hook.favorite);
-  $("favorite-webhooks-empty").hidden = favorites.length > 0;
+  const editing = webhooks.favoritesDraft !== null;
+  $("favorites-edit").hidden = editing;
+  $("favorites-edit").setAttribute("aria-expanded", String(editing));
+  $("favorites-editor").hidden = !editing;
+  $("favorite-webhooks").hidden = editing;
+  const favorites = favoriteWebhooks();
+  $("favorite-webhooks-empty").hidden = editing || favorites.length > 0;
+  if (editing) return;
   $("favorite-webhooks").replaceChildren(...favorites.map((hook) => {
     const button = document.createElement("button");
     button.type = "button";
+    button.classList.toggle("favorite-full-width", hook.favoriteWidth === 2);
     button.textContent = webhookDisplayName(hook);
     button.disabled = !state.socketOpen || webhooks.pending.has(hook.id);
     button.addEventListener("click", () => triggerWebhook(hook));
     return button;
   }));
+}
+
+function startFavoritesEditor() {
+  webhooks.favoritesDraft = favoriteWebhooks().map((hook) => ({ ...hook }));
+  showFavoriteWebhookError("");
+  $("favorite-webhooks-status").hidden = true;
+  renderFavoriteWebhooks();
+  renderFavoritesEditor();
+}
+
+function closeFavoritesEditor() {
+  webhooks.favoritesDraft = null;
+  renderFavoriteWebhooks();
+  $("favorites-edit").focus();
+}
+
+function moveFavorite(from, to) {
+  const draft = webhooks.favoritesDraft;
+  draft.splice(to, 0, draft.splice(from, 1)[0]);
+  renderFavoritesEditor();
+  $("favorites-items").children[to].querySelector(".favorite-drag").focus();
+}
+
+function renderFavoritesEditor() {
+  const draft = webhooks.favoritesDraft;
+  $("favorites-items").replaceChildren(...draft.map((hook, index) => {
+    const item = document.createElement("div");
+    item.className = "favorite-editor-item";
+    item.classList.toggle("favorite-full-width", hook.favoriteWidth === 2);
+    item.dataset.index = index;
+    const handle = document.createElement("button");
+    handle.type = "button";
+    handle.className = "favorite-drag";
+    handle.textContent = `Drag: ${webhookDisplayName(hook)}`;
+    handle.setAttribute("aria-label", `Drag to reorder ${webhookDisplayName(hook)}`);
+    let targetIndex = index;
+    const clearTarget = () => {
+      for (const child of $("favorites-items").children) child.classList.remove("drop-target");
+    };
+    handle.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
+      targetIndex = index;
+      handle.setPointerCapture(event.pointerId);
+    });
+    handle.addEventListener("pointermove", (event) => {
+      if (!handle.hasPointerCapture(event.pointerId)) return;
+      const target = document.elementFromPoint(event.clientX, event.clientY)?.closest(".favorite-editor-item");
+      clearTarget();
+      targetIndex = target ? Number(target.dataset.index) : index;
+      if (target && targetIndex !== index) target.classList.add("drop-target");
+    });
+    handle.addEventListener("pointerup", (event) => {
+      if (!handle.hasPointerCapture(event.pointerId)) return;
+      handle.releasePointerCapture(event.pointerId);
+      clearTarget();
+      if (targetIndex !== index) moveFavorite(index, targetIndex);
+    });
+    handle.addEventListener("pointercancel", clearTarget);
+    const label = document.createElement("label");
+    label.htmlFor = `favorite-name-${hook.id}`;
+    label.textContent = "Display name";
+    const name = document.createElement("input");
+    name.type = "text";
+    name.id = label.htmlFor;
+    name.maxLength = 100;
+    name.value = hook.displayName || "";
+    name.placeholder = webhookDisplayName({ ...hook, displayName: "" });
+    name.addEventListener("input", () => { hook.displayName = name.value; });
+    const widthLabel = document.createElement("label");
+    widthLabel.htmlFor = `favorite-width-${hook.id}`;
+    widthLabel.textContent = "Button width";
+    const width = document.createElement("select");
+    width.id = widthLabel.htmlFor;
+    width.replaceChildren(new Option("Half row (2 per row)", "1"), new Option("Full row (1 per row)", "2"));
+    width.value = String(hook.favoriteWidth);
+    width.addEventListener("change", () => {
+      hook.favoriteWidth = Number(width.value);
+      item.classList.toggle("favorite-full-width", hook.favoriteWidth === 2);
+    });
+    const actions = document.createElement("div");
+    actions.className = "actions";
+    for (const [text, disabled, action] of [
+      ["Move up", index === 0, () => moveFavorite(index, index - 1)],
+      ["Move down", index === draft.length - 1, () => moveFavorite(index, index + 1)],
+      ["Remove", false, () => {
+        draft.splice(index, 1);
+        renderFavoritesEditor();
+        $("favorites-add-hook").focus();
+      }],
+    ]) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = text;
+      button.setAttribute("aria-label", `${text}: ${webhookDisplayName(hook)}`);
+      button.disabled = disabled;
+      button.addEventListener("click", action);
+      actions.append(button);
+    }
+    item.append(handle, label, name, widthLabel, width, actions);
+    return item;
+  }));
+  const available = webhooks.list.filter((hook) => !draft.some((item) => item.id === hook.id));
+  $("favorites-add-hook").replaceChildren(...available.map((hook) => new Option(webhookDisplayName(hook), hook.id)));
+  if (!available.length) $("favorites-add-hook").add(new Option("No more hooks available", ""));
+  $("favorites-add-hook").disabled = available.length === 0;
+  $("favorites-add").disabled = available.length === 0;
+}
+
+async function saveFavorites(event) {
+  event.preventDefault();
+  const favorites = webhooks.favoritesDraft.map(({ id, displayName, favoriteWidth }) => ({ id, displayName, favoriteWidth }));
+  const controls = [...$("favorites-editor").querySelectorAll("button, input, select")];
+  const disabled = controls.map((control) => control.disabled);
+  controls.forEach((control) => { control.disabled = true; });
+  showFavoriteWebhookError("");
+  try {
+    const data = await webhookRequest("PUT", "api/webhooks/favorites", { favorites });
+    webhooks.list = data.webhooks;
+    closeFavoritesEditor();
+    renderWebhooks();
+    $("favorite-webhooks-status").textContent = "Favorites saved.";
+    $("favorite-webhooks-status").hidden = false;
+  } catch (error) {
+    showFavoriteWebhookError(error.message === "Failed to fetch" ? "Network error" : error.message);
+  } finally {
+    controls.forEach((control, index) => { control.disabled = disabled[index]; });
+  }
 }
 
 async function triggerWebhook(hook) {
@@ -401,6 +540,7 @@ async function saveWebhook(event) {
     return;
   }
   const body = {
+    ...webhooks.list.find((hook) => hook.id === webhooks.editing),
     name: $("webhook-name").value,
     displayName: $("webhook-display-name").value,
     enabled: $("webhook-enabled").checked,
@@ -522,6 +662,16 @@ $("nav-controls").addEventListener("click", (event) => {
   if (button && !button.disabled) sendRemote(button.dataset.key);
 });
 $("webhook-add").addEventListener("click", () => editWebhook(null, false));
+$("favorites-edit").addEventListener("click", startFavoritesEditor);
+$("favorites-cancel").addEventListener("click", closeFavoritesEditor);
+$("favorites-editor").addEventListener("submit", saveFavorites);
+$("favorites-add").addEventListener("click", () => {
+  const hook = webhooks.list.find((item) => item.id === $("favorites-add-hook").value);
+  if (!hook) return;
+  webhooks.favoritesDraft.push({ ...hook });
+  renderFavoritesEditor();
+  $("favorites-items").lastElementChild.querySelector("input").focus();
+});
 $("webhook-cancel").addEventListener("click", closeWebhookForm);
 $("webhook-form").addEventListener("submit", saveWebhook);
 $("tags-form").addEventListener("submit", saveTags);

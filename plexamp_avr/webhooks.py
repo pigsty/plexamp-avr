@@ -113,6 +113,12 @@ def validate_webhook(data: Any) -> dict[str, Any]:
     favorite = data.get("favorite", False)
     if not isinstance(favorite, bool):
         raise ValueError("favorite must be true or false")
+    favorite_order = data.get("favoriteOrder", 0)
+    if type(favorite_order) is not int or favorite_order < 0:
+        raise ValueError("favoriteOrder must be a non-negative integer")
+    favorite_width = data.get("favoriteWidth", 1)
+    if type(favorite_width) is not int or favorite_width not in (1, 2):
+        raise ValueError("favoriteWidth must be 1 or 2")
     zone = normalize_zone(data["zone"]) if isinstance(data.get("zone"), str) else None
     if zone is None:
         raise ValueError(f"zone must be one of {', '.join(ZONES)}")
@@ -180,6 +186,8 @@ def validate_webhook(data: Any) -> dict[str, Any]:
         "displayName": display_name.strip(),
         "enabled": enabled,
         "favorite": favorite,
+        "favoriteOrder": favorite_order,
+        "favoriteWidth": favorite_width,
         "zone": zone,
         "event": event,
         "value": value,
@@ -324,6 +332,38 @@ class WebhookStore:
             self._save(webhooks)
             self._webhooks = webhooks
         return True
+
+    def replace_favorites(self, data: Any) -> list[dict[str, Any]]:
+        """Atomically update favorite presentation without changing hook actions."""
+        if not isinstance(data, list):
+            raise ValueError("favorites must be a list")
+        with self._lock:
+            by_id = {hook["id"]: hook for hook in self._webhooks}
+            updates = {}
+            for order, item in enumerate(data):
+                if not isinstance(item, dict) or not isinstance(item.get("id"), str):
+                    raise ValueError("each favorite must have an id")
+                webhook_id = item["id"]
+                if webhook_id not in by_id:
+                    raise ValueError("unknown webhook; reload favorites and try again")
+                if webhook_id in updates:
+                    raise ValueError("duplicate favorite id")
+                if "displayName" not in item or "favoriteWidth" not in item:
+                    raise ValueError("each favorite must have displayName and favoriteWidth")
+                updates[webhook_id] = {
+                    "id": webhook_id,
+                    **validate_webhook({
+                        **by_id[webhook_id], "favorite": True, "favoriteOrder": order,
+                        "displayName": item["displayName"], "favoriteWidth": item["favoriteWidth"],
+                    }),
+                }
+            webhooks = [
+                updates.get(hook["id"], {**hook, "favorite": False})
+                for hook in self._webhooks
+            ]
+            self._save(webhooks)
+            self._webhooks = webhooks
+            return [dict(hook) for hook in webhooks]
 
 
 def zone_events(previous: dict[str, Any], current: dict[str, Any]) -> list[tuple[str, str, str]]:
