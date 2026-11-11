@@ -21,6 +21,10 @@ STATUS_QUERIES = ("ZM?", "SI?", "MV?", "MU?", "MS?", "Z2?", "Z2MU?", "Z3?", "Z3M
 # Denon recommends at least 50ms between commands.
 COMMAND_INTERVAL_SECONDS = 0.05
 VOLUME_RESTORE_SECONDS = 5.0
+# The AVR may ignore volume commands briefly after an input switch.
+VOLUME_RESTORE_ATTEMPTS = 3
+VOLUME_RESTORE_RETRY_SECONDS = 1.0
+INPUT_STATUS_TIMEOUT_SECONDS = 5.0
 # Number of recent AVR status updates and commands kept for the debug view.
 HISTORY_SIZE = 25
 # Zone 2/3 events that do not describe power, input, volume or mute.
@@ -46,6 +50,7 @@ class _VolumeRestore:
     echo: str
     ready: bool = False
     restoring: float | None = None
+    attempts: int = 0
     timer: threading.Timer | None = None
 
 
@@ -202,12 +207,14 @@ class DenonClient:
         self._volumes: dict[str, dict[str, float]] = {zone: {} for zone in ZONES}
         self._restores: dict[str, _VolumeRestore] = {}
         self._unconfirmed_inputs: dict[str, str] = {}
+        self._input_status_timers: dict[str, threading.Timer] = {}
         # Input each zone was on when it powered off; only used to pick the
         # volume to restore at the next power-on, never published.
         self._power_off_inputs: dict[str, str] = {}
         self._superseded_inputs: dict[str, set[str]] = {}
         self._load_volumes()
-        LOGGER.info("Denon client initialized with address: %s:%d", self.address, self.port)
+        LOGGER.info("Denon client initialized with address: %s:%d (MAX_VOLUME=%s)",
+                    self.address, self.port, self.max_volume)
 
     # Connection lifecycle -------------------------------------------------
 
@@ -223,6 +230,7 @@ class DenonClient:
         self._stop.set()
         with self._condition:
             self._cancel_restores()
+            self._cancel_input_status_queries()
             sock = self._socket
         if sock is not None:
             self._shutdown(sock)
@@ -265,6 +273,7 @@ class DenonClient:
             finally:
                 with self._condition:
                     self._cancel_restores()
+                    self._cancel_input_status_queries()
                     self._unconfirmed_inputs.clear()
                     self._socket = None
                     self._connected = False
@@ -447,6 +456,35 @@ class DenonClient:
         for zone in list(self._restores):
             self._cancel_restore(zone, reason)
 
+    def _cancel_input_status_query(self, zone: str) -> None:
+        timer = self._input_status_timers.pop(zone, None)
+        if timer is not None:
+            timer.cancel()
+
+    def _cancel_input_status_queries(self) -> None:
+        for zone in list(self._input_status_timers):
+            self._cancel_input_status_query(zone)
+
+    def _schedule_input_status_query(self, zone: str) -> None:
+        self._cancel_input_status_query(zone)
+        timer: threading.Timer
+        timer = threading.Timer(
+            INPUT_STATUS_TIMEOUT_SECONDS, lambda: self._query_input_status(zone, timer)
+        )
+        timer.daemon = True
+        self._input_status_timers[zone] = timer
+        timer.start()
+
+    def _query_input_status(self, zone: str, timer: threading.Timer) -> None:
+        with self._condition:
+            if self._input_status_timers.get(zone) is not timer or self._stop.is_set():
+                return
+            self._input_status_timers.pop(zone)
+        query = "SI?" if zone == "z1" else f"{zone.upper()}?"
+        LOGGER.info("No input status received from AVR for %s within %ss; querying once",
+                    zone.upper(), INPUT_STATUS_TIMEOUT_SECONDS)
+        self.send(query)
+
     def _schedule_restore(self, zone: str, pending: _VolumeRestore, delay: float) -> None:
         if pending.timer is not None:
             pending.timer.cancel()
@@ -457,6 +495,7 @@ class DenonClient:
     def _track_command(self, command: str, suppress_power_restore: bool) -> None:
         if command == "PWSTANDBY":
             self._cancel_restores("standby command sent")
+            self._cancel_input_status_queries()
             self._unconfirmed_inputs.clear()
             return
         head, value = command[:2], command[2:]
@@ -465,6 +504,7 @@ class DenonClient:
             return
         if value == "OFF" and head in {"ZM", "Z2", "Z3"}:
             self._cancel_restore(zone, "power off command sent")
+            self._cancel_input_status_query(zone)
             self._unconfirmed_inputs.pop(zone, None)
             return
         if head == "MV" or (head in {"Z2", "Z3"} and
@@ -474,6 +514,7 @@ class DenonClient:
         power_on = value == "ON" and head in {"ZM", "Z2", "Z3"}
         if power_on and suppress_power_restore:
             self._cancel_restore(zone, "power-on helper will select the input")
+            self._schedule_input_status_query(zone)
             LOGGER.debug("Power-on helper started for %s; waiting for its input selection before restoring volume",
                          zone.upper())
             # Guard power-on transition observations until the helper selects
@@ -491,6 +532,7 @@ class DenonClient:
         if not power_on and head in {"Z2", "Z3"} and (
                 value.startswith(_IGNORED_ZONE_EVENTS) or value.startswith("MU")):
             return
+        self._schedule_input_status_query(zone)
         superseded = set(self._superseded_inputs.get(zone, set()))
         unconfirmed = self._unconfirmed_inputs.get(zone)
         if unconfirmed is not None:
@@ -515,6 +557,7 @@ class DenonClient:
     def _volume_event(self, line: str) -> None:
         if line == "PWSTANDBY":
             self._cancel_restores("AVR reported standby")
+            self._cancel_input_status_queries()
             self._unconfirmed_inputs.clear()
             return
         head, value = line[:2], line[2:]
@@ -523,12 +566,14 @@ class DenonClient:
             return
         if value == "OFF" and head in {"ZM", "Z2", "Z3"}:
             self._cancel_restore(zone, "AVR reported zone power off")
+            self._cancel_input_status_query(zone)
             self._unconfirmed_inputs.pop(zone, None)
             return
         is_input = head == "SI" or (head in {"Z2", "Z3"} and value
                     and not value.isdigit() and value not in _RESERVED_INPUTS
                     and not value.startswith(_IGNORED_ZONE_EVENTS))
         if is_input:
+            self._cancel_input_status_query(zone)
             self._unconfirmed_inputs.pop(zone, None)
         pending = self._restores.get(zone)
         if pending is not None and is_input and pending.target is not None and value != pending.target:
@@ -579,10 +624,18 @@ class DenonClient:
                     return
                 pending.ready = True
                 if pending.restoring is not None:
-                    LOGGER.info("AVR did not confirm restored volume %s for %s input %s within %ss",
-                                pending.restoring, zone.upper(), pending.target, VOLUME_RESTORE_SECONDS)
-                    self._cancel_restore(zone, "confirmation timed out")
-                    return
+                    if pending.attempts >= VOLUME_RESTORE_ATTEMPTS:
+                        LOGGER.info("AVR did not confirm restored volume %s for %s input %s after %d attempts",
+                                    pending.restoring, zone.upper(), pending.target, pending.attempts)
+                        self._cancel_restore(zone, "confirmation timed out")
+                        return
+                    state = self._zones[zone]
+                    if state.power == "off" or (state.input is not None and state.input != pending.target):
+                        self._cancel_restore(zone, "zone changed before retry")
+                        return
+                    LOGGER.info("AVR did not confirm restored volume %s for %s input %s; retrying (%d/%d)",
+                                pending.restoring, zone.upper(), pending.target,
+                                pending.attempts + 1, VOLUME_RESTORE_ATTEMPTS)
                 if pending.target is None:
                     LOGGER.debug("Volume restore for %s waiting for the AVR to report its input", zone.upper())
                     return
@@ -620,8 +673,11 @@ class DenonClient:
                     self._cancel_restore(zone, "send failed")
                     self._shutdown(sock)
                 else:
+                    pending.attempts += 1
                     self._record_command(command, True, "volume restore")
-                    self._schedule_restore(zone, pending, VOLUME_RESTORE_SECONDS)
+                    self._schedule_restore(
+                        zone, pending, VOLUME_RESTORE_RETRY_SECONDS * 2 ** (pending.attempts - 1)
+                    )
                 finally:
                     self._last_send = time.monotonic()
 
@@ -722,7 +778,12 @@ class DenonClient:
             wait = self._last_send + COMMAND_INTERVAL_SECONDS - time.monotonic()
             if wait > 0:
                 time.sleep(wait)
-            LOGGER.debug("Sending command to Denon AVR: %r", command)
+            update = describe_update(command)
+            if update is not None and update["event"] == "volume":
+                LOGGER.debug("Sending command to Denon AVR: %r (volume=%s, MAX_VOLUME=%s)",
+                             command, update["value"], self.max_volume)
+            else:
+                LOGGER.debug("Sending command to Denon AVR: %r", command)
             try:
                 with self._condition:
                     sock.sendall(payload)

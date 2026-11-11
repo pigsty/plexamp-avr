@@ -33,9 +33,12 @@ The installer uses only Python's standard library. Configure `plexamp_host`, `pl
 The last volume reported by the AVR is remembered separately for each zone and
 input. After an input-selection or power-on command, the remembered volume is
 restored when the AVR reports the matching status, or after five seconds,
-whichever comes first. Inputs without a remembered volume are left unchanged.
-This applies to playback automation and API/web UI commands. A newer input,
-power-off or manual volume command cancels an outstanding restore.
+whichever comes first. If the AVR does not confirm the restored volume, it is
+retried with backoff, for at most three attempts in total. Inputs without a
+remembered volume are left unchanged.
+This applies to playback automation and API/web UI commands. A newer or
+reported input change, power-off or manual volume command cancels an
+outstanding restore, including pending retries.
 Volumes are saved as `volumes.json` in `data_dir` and survive service restarts.
 The old `preset_volume` setting is no longer used and can be removed.
 
@@ -47,6 +50,12 @@ The slider retains its full range while dragging and snaps to the limit on
 release. AVR-reported volume is still displayed as-is; changes made on the
 receiver itself are not limited. Increasing volume requires a known current
 volume; otherwise the API returns `400`.
+
+Denon encodes half-step volumes without a decimal point: `MV285` means **28.5**
+on its 0-98 scale, not 285. `MAX_VOLUME` uses the decoded scale, so a limit of
+`28` caps this command (and a remembered-volume restore) to `MV28`.
+Startup logs show the effective `MAX_VOLUME`; volume-command debug logs also
+show the decoded value alongside the raw command.
 
 Web UI/API settings: `web_enabled` (default `true`), `web_host` (default `0.0.0.0`),
 `web_port` (default `8080`), `avr_inputs`, a comma-separated list of inputs
