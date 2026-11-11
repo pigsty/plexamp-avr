@@ -242,6 +242,69 @@ class VolumeMemoryTests(unittest.TestCase):
         self.client.set_volume(85)
         self.assertEqual(self.commands()[-1], "MV75")
 
+    def test_restore_retries_with_backoff_up_to_three_attempts(self):
+        self.seed()
+        with patch.object(self.client, "_schedule_restore") as schedule:
+            self.client.send("SICD")
+            self.observe("SICD")
+            for _ in range(4):
+                self.finish()
+        self.assertEqual(self.commands(), ["SICD", "MV40", "MV40", "MV40"])
+        self.assertEqual([call.args[2] for call in schedule.call_args_list[-3:]], [1.0, 2.0, 4.0])
+        self.assertNotIn("z1", self.client._restores)
+
+    def test_confirmed_restore_stops_retries(self):
+        self.seed()
+        with patch.object(self.client, "_schedule_restore"):
+            self.client.send("SICD")
+            self.observe("SICD")
+            self.finish()
+            pending = self.client._restores["z1"]
+            self.observe("MV40")
+            self.client._restore_volume("z1", pending)
+        self.assertEqual(self.commands(), ["SICD", "MV40"])
+
+    def test_restore_retry_stops_when_input_changes_or_power_turns_off(self):
+        for change in (lambda: self.observe("SIDVD"), lambda: self.observe("ZMOFF"),
+                       lambda: self.client.send("SITV"), lambda: self.client.send("ZMOFF")):
+            with self.subTest(change=change):
+                self.client._socket.reset_mock()
+                self.observe("ZMON", "SICD", "MV40", "SITV", "MV20")
+                with patch.object(self.client, "_schedule_restore"):
+                    self.client.send("SICD")
+                    self.observe("SICD")
+                    self.finish()
+                    pending = self.client._restores["z1"]
+                    change()
+                    self.client._restore_volume("z1", pending)
+                self.assertEqual(self.commands().count("MV40"), 1)
+                self.assertIsNot(self.client._restores.get("z1"), pending)
+
+    def test_half_step_wire_volume_is_capped_as_decoded_value(self):
+        for maximum, expected in ((28, "MV28"), (29, "MV285")):
+            with self.subTest(maximum=maximum):
+                self.client.max_volume = maximum
+                with self.assertLogs("plexamp_avr.denon", level="DEBUG") as logs:
+                    self.client.send("MV285")
+                self.assertEqual(self.commands()[-1], expected)
+                self.assertLessEqual(parse_volume(expected[2:]), maximum)
+                self.assertTrue(any(f"MAX_VOLUME={maximum}" in line for line in logs.output))
+
+    def test_half_step_restore_respects_limit_after_input_or_power_on(self):
+        for command in ("SICD", "ZMON"):
+            for maximum, expected in ((28, "MV28"), (29, "MV285")):
+                with self.subTest(command=command, maximum=maximum):
+                    self.client.max_volume = maximum
+                    self.observe("SICD", "MV285")
+                    if command == "SICD":
+                        self.observe("SITV")
+                    with patch.object(self.client, "_schedule_restore"):
+                        self.client.send(command)
+                        self.finish()
+                    self.assertEqual(self.commands()[-1], expected)
+                    self.assertLessEqual(parse_volume(self.commands()[-1][2:]), maximum)
+                    self.observe(expected)
+
     def test_input_timeout_restores_without_blocking_or_reassigning_cached_volume(self):
         self.seed()
         started = time.monotonic()
@@ -504,6 +567,44 @@ class VolumeMemoryTests(unittest.TestCase):
         pending = self.client._restores["z1"]
         self.assertEqual(pending.echo, commands[-1])
         self.assertEqual(pending.target, commands[-1][2:])
+
+    def test_input_command_queries_status_once_after_timeout(self):
+        self.client.send("SICD")
+        timer = self.client._input_status_timers["z1"]
+
+        timer.function(*timer.args)
+        timer.function(*timer.args)
+
+        self.assertEqual(self.commands(), ["SICD", "SI?"])
+
+    def test_input_status_cancels_delayed_query(self):
+        self.client.send("SICD")
+        timer = self.client._input_status_timers["z1"]
+
+        self.observe("SICD")
+        timer.function(*timer.args)
+
+        self.assertEqual(self.commands(), ["SICD"])
+
+    def test_superseded_input_command_does_not_trigger_early_query(self):
+        self.client.send("SICD")
+        previous_timer = self.client._input_status_timers["z1"]
+        self.client.send("SITV")
+        current_timer = self.client._input_status_timers["z1"]
+
+        previous_timer.function(*previous_timer.args)
+        self.assertEqual(self.commands(), ["SICD", "SITV"])
+
+        current_timer.function(*current_timer.args)
+        self.assertEqual(self.commands(), ["SICD", "SITV", "SI?"])
+
+    def test_power_on_queries_input_status_after_timeout(self):
+        self.client.send("ZMON")
+        timer = self.client._input_status_timers["z1"]
+
+        timer.function(*timer.args)
+
+        self.assertEqual(self.commands(), ["ZMON", "SI?"])
 
     def test_power_off_clears_input_but_next_power_on_restores_previous_input_volume(self):
         self.seed()
