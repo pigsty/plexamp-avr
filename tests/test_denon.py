@@ -505,6 +505,67 @@ class VolumeMemoryTests(unittest.TestCase):
         self.assertEqual(pending.echo, commands[-1])
         self.assertEqual(pending.target, commands[-1][2:])
 
+    def test_power_off_clears_input_but_next_power_on_restores_previous_input_volume(self):
+        self.seed()
+        self.observe("Z2CD", "Z2ON", "Z3TV", "Z3ON", "ZMOFF", "Z2OFF")
+        zones = self.client.snapshot()["zones"]
+        self.assertEqual((zones["z1"]["power"], zones["z1"]["input"]), ("off", None))
+        self.assertEqual((zones["z2"]["power"], zones["z2"]["input"]), ("off", None))
+        self.assertEqual(zones["z3"]["input"], "TV")
+        self.observe("PWSTANDBY")
+        self.assertIsNone(self.client.snapshot()["zones"]["z3"]["input"])
+        # The input before power-off still selects the volume to restore.
+        with self.assertLogs("plexamp_avr.denon", level="INFO") as logs:
+            self.client.send("ZMON")
+            self.observe("ZMON")
+            self.assertTrue(self.wait(lambda: "MV20" in self.commands()))
+            self.observe("MV20")
+        output = "\n".join(logs.output)
+        self.assertIn("Volume restore pending for Z1 input TV after 'ZMON' (saved volume: 20.0)", output)
+        self.assertIn("Restoring saved volume 20.0 for Z1 input TV", output)
+        self.assertIn("AVR confirmed restored volume 20.0 for Z1 input TV", output)
+        self.assertIsNone(self.client.snapshot()["zones"]["z1"]["input"])
+        self.observe("SITV")
+        self.assertEqual(self.client._volumes["z1"], {"CD": 40, "TV": 20})
+
+    def test_restore_logging_levels(self):
+        self.seed()
+        self.client.max_volume = 30
+        self.observe("SICD", "MV80", "SITV")
+        with self.assertLogs("plexamp_avr.denon", level="DEBUG") as logs:
+            self.client.send("SICD")
+            self.observe("SICD")
+            self.assertTrue(self.wait(lambda: "MV30" in self.commands()))
+        info = [line for line in logs.output if line.startswith("INFO")]
+        debug = [line for line in logs.output if line.startswith("DEBUG")]
+        self.assertTrue(any("exceeds MAX_VOLUME; restoring 30" in line for line in info))
+        self.assertTrue(any("AVR echoed 'SICD'" in line for line in debug))
+        with self.assertLogs("plexamp_avr.denon", level="INFO") as logs:
+            self.client.send("SIGAME")
+            with self.client._send_lock:
+                self.observe("SIGAME", "MV30")
+        self.assertTrue(any("No saved volume for Z1 input GAME; remembering current volume 30" in line
+                            for line in logs.output))
+
+    def test_history_keeps_relevant_updates_and_sent_commands(self):
+        self.seed()
+        self.observe("ZMON", "SICD", "MSMOVIE", "MVMAX 98", "MV405", "MUON", "Z2CVFL 50", "Z2TV", "Z330", "PWSTANDBY")
+        self.client.send("SICD")
+        self.finish()
+        updates = self.client.history()["updates"]
+        self.assertEqual([entry["line"] for entry in updates[:7]],
+                         ["PWSTANDBY", "Z330", "Z2TV", "MUON", "MV405", "SICD", "ZMON"])
+        self.assertEqual({key: updates[4][key] for key in ("zone", "event", "value")},
+                         {"zone": "z1", "event": "volume", "value": 40.5})
+        commands = self.client.history()["commands"]
+        self.assertEqual([(entry["command"], entry.get("note")) for entry in commands],
+                         [("MV405", "volume restore"), ("SICD", None)])
+        for _ in range(30):
+            self.observe("MV20")
+            self.client.send("MV20")
+        self.assertEqual(len(self.client.history()["updates"]), 25)
+        self.assertEqual(len(self.client.history()["commands"]), 25)
+
 
 if __name__ == "__main__":
     unittest.main()

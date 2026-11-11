@@ -120,6 +120,23 @@ output { font-variant-numeric: tabular-nums; }
 #saved-volumes dt { overflow-wrap: anywhere; }
 #saved-volumes dd { margin: 0; font-variant-numeric: tabular-nums; }
 
+.history-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.5rem; margin-top: 0.75rem; }
+.history-tabs button { min-width: 0; padding: 0 0.25rem; background: var(--bg); font-size: 0.9rem; line-height: 1.15; }
+.history { list-style: none; margin: 0.75rem 0 0; padding: 0; }
+.history li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.15rem 0.75rem;
+  padding: 0.6rem 0;
+  border-top: 1px solid #333842;
+  font-size: 0.9rem;
+}
+.history li:first-child { border-top: 0; }
+.history time { color: var(--muted); font-variant-numeric: tabular-nums; }
+.history-main { overflow-wrap: anywhere; }
+.history-detail { grid-column: 2; color: var(--muted); font-family: ui-monospace, monospace; font-size: 0.8rem; overflow-wrap: anywhere; }
+.history li.failed .history-main, .history li.failed .history-detail { color: var(--bad); }
+
 .form label { margin-top: 0.75rem; }
 .form input[type="text"], .form input[type="url"], .form textarea {
   display: block; width: 100%; margin-top: 0.5rem; padding: 0.75rem; background: var(--bg);

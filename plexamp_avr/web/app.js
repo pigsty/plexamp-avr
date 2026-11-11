@@ -172,14 +172,102 @@ function renderSavedVolumes() {
   }));
 }
 
+// Debug activity history ----------------------------------------------------
+
+const HISTORY_POLL_MS = 2000;
+const HISTORY_KEYS = { updates: "avr_updates", commands: "avr_commands", webhooks: "webhooks" };
+const activity = { tab: "updates", data: null, error: "", timer: null, loading: false };
+
+function formatTime(seconds) {
+  return new Date(seconds * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+function describeActivity(kind, entry) {
+  if (kind === "updates") {
+    const zone = entry.zone === "all" ? "All zones" : entry.zone.toUpperCase();
+    const value = entry.event === "volume" ? formatVolume(entry.value)
+      : entry.event === "input" ? inputLabel(entry.value) : entry.value;
+    return { main: `${zone} ${entry.event}: ${value}`, detail: entry.line, ok: true };
+  }
+  if (kind === "commands") {
+    const detail = [entry.note, entry.ok ? "" : "failed"].filter(Boolean).join(" · ");
+    return { main: entry.command, detail, ok: entry.ok };
+  }
+  const ok = entry.status !== null && entry.status < 400;
+  const result = entry.status !== null ? `→ ${entry.status}` : `→ failed${entry.error ? `: ${entry.error}` : ""}`;
+  return {
+    main: `${entry.name || "Unnamed webhook"} (${entry.event})`,
+    detail: `${entry.method} ${entry.url} ${result}`,
+    ok,
+  };
+}
+
+function renderActivity() {
+  for (const tab of document.querySelectorAll("#history-tabs [role=\"tab\"]")) {
+    const selected = tab.dataset.history === activity.tab;
+    tab.setAttribute("aria-selected", String(selected));
+    tab.tabIndex = selected ? 0 : -1;
+  }
+  $("history-list").setAttribute("aria-labelledby", `history-tab-${activity.tab}`);
+  $("history-error").textContent = activity.error;
+  $("history-error").hidden = !activity.error;
+  const entries = (activity.data && activity.data[HISTORY_KEYS[activity.tab]]) || [];
+  $("history-empty").hidden = !activity.data || entries.length > 0;
+  $("history-list").replaceChildren(...entries.map((entry) => {
+    const { main, detail, ok } = describeActivity(activity.tab, entry);
+    const item = document.createElement("li");
+    item.classList.toggle("failed", !ok);
+    const time = document.createElement("time");
+    time.dateTime = new Date(entry.time * 1000).toISOString();
+    time.textContent = formatTime(entry.time);
+    const text = document.createElement("span");
+    text.className = "history-main";
+    text.textContent = main;
+    item.append(time, text);
+    if (detail) {
+      const extra = document.createElement("span");
+      extra.className = "history-detail";
+      extra.textContent = detail;
+      item.append(extra);
+    }
+    return item;
+  }));
+}
+
+async function loadActivity() {
+  if (activity.loading || document.hidden) return;
+  activity.loading = true;
+  try {
+    const response = await fetch("api/debug/history", { cache: "no-store" });
+    if (!response.ok) throw new Error(`Request failed (${response.status})`);
+    activity.data = await response.json();
+    activity.error = "";
+  } catch (error) {
+    activity.error = error.message === "Failed to fetch" ? "Network error" : error.message;
+  } finally {
+    activity.loading = false;
+  }
+  if (!$("debug-panel").hidden) renderActivity();
+}
+
+function selectActivityTab(tab) {
+  activity.tab = tab;
+  renderActivity();
+}
+
 function selectPage() {
   const debug = window.location.hash === "#debug";
   $("debug-panel").hidden = !debug;
   $("view-tabs").hidden = debug;
   $("debug-link").hidden = debug;
+  clearInterval(activity.timer);
+  activity.timer = null;
   if (debug) {
     for (const id of ["zone-panel", "nav-panel", "webhooks-panel"]) $(id).hidden = true;
     render();
+    renderActivity();
+    loadActivity();
+    activity.timer = setInterval(loadActivity, HISTORY_POLL_MS);
   } else {
     selectZone(state.zone);
   }
@@ -187,7 +275,7 @@ function selectPage() {
 
 function selectZone(zone) {
   state.zone = zone;
-  for (const tab of document.querySelectorAll('[role="tab"]')) {
+  for (const tab of document.querySelectorAll('#view-tabs [role="tab"]')) {
     tab.setAttribute("aria-selected", String(tab.dataset.zone === zone));
   }
   $("zone-panel").hidden = false;
@@ -200,7 +288,7 @@ function selectZone(zone) {
 }
 
 function selectWebhooks() {
-  for (const tab of document.querySelectorAll('[role="tab"]')) {
+  for (const tab of document.querySelectorAll('#view-tabs [role="tab"]')) {
     tab.setAttribute("aria-selected", String(tab.dataset.view === "webhooks"));
   }
   $("zone-panel").hidden = true;
@@ -211,7 +299,7 @@ function selectWebhooks() {
 }
 
 function selectNavigation() {
-  for (const tab of document.querySelectorAll('[role="tab"]')) {
+  for (const tab of document.querySelectorAll('#view-tabs [role="tab"]')) {
     tab.setAttribute("aria-selected", String(tab.dataset.view === "nav"));
   }
   $("zone-panel").hidden = true;
@@ -714,13 +802,29 @@ function connect() {
   });
 }
 
-for (const tab of document.querySelectorAll('[role="tab"]')) {
+for (const tab of document.querySelectorAll('#view-tabs [role="tab"]')) {
   tab.addEventListener("click", () => {
     if (tab.dataset.view === "webhooks") selectWebhooks();
     else if (tab.dataset.view === "nav") selectNavigation();
     else selectZone(tab.dataset.zone);
   });
 }
+$("history-tabs").addEventListener("click", (event) => {
+  const tab = event.target.closest("[data-history]");
+  if (tab) selectActivityTab(tab.dataset.history);
+});
+$("history-tabs").addEventListener("keydown", (event) => {
+  if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+  const tabs = [...document.querySelectorAll("#history-tabs [role=\"tab\"]")];
+  const index = tabs.findIndex((tab) => tab.dataset.history === activity.tab);
+  const next = tabs[(index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length];
+  selectActivityTab(next.dataset.history);
+  next.focus();
+  event.preventDefault();
+});
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && !$("debug-panel").hidden) loadActivity();
+});
 $("sound-modes").addEventListener("click", (event) => {
   const button = event.target.closest("button[data-mode]");
   if (button && !button.disabled) send("sound-mode", { mode: button.dataset.mode });

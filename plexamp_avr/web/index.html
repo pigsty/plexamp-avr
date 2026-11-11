@@ -159,6 +159,18 @@
       <h2 id="saved-volumes-title">Saved volume levels per input</h2>
       <div id="saved-volumes"></div>
     </section>
+    <section class="card" aria-labelledby="history-title">
+      <h2 id="history-title">Recent activity</h2>
+      <p class="muted">Last 25 of each, newest first.</p>
+      <div id="history-tabs" class="history-tabs" role="tablist" aria-label="Recent activity">
+        <button type="button" role="tab" id="history-tab-updates" data-history="updates" aria-selected="true" aria-controls="history-list">AVR updates</button>
+        <button type="button" role="tab" id="history-tab-commands" data-history="commands" aria-selected="false" aria-controls="history-list" tabindex="-1">Commands</button>
+        <button type="button" role="tab" id="history-tab-webhooks" data-history="webhooks" aria-selected="false" aria-controls="history-list" tabindex="-1">Webhooks</button>
+      </div>
+      <ol id="history-list" class="history" role="tabpanel" aria-labelledby="history-tab-updates"></ol>
+      <p id="history-empty" class="muted" hidden>Nothing recorded yet.</p>
+      <p id="history-error" class="error" role="alert" hidden></p>
+    </section>
   </main>
   <footer class="playback-footer">
     <section id="favorite-webhooks-card" class="card" aria-labelledby="favorite-webhooks-title">

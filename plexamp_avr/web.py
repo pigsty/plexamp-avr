@@ -83,6 +83,7 @@ class WebServer:
         controller: AvrController | None = None,
         webhook_trigger: Callable[[dict[str, Any]], bool] | None = None,
         tags: TagStore | None = None,
+        webhook_history: Callable[[], list[dict[str, Any]]] | None = None,
     ):
         self.avr = avr
         self.webhooks = webhooks
@@ -92,6 +93,7 @@ class WebServer:
         self.command_listener = command_listener
         self.controller = controller
         self.webhook_trigger = webhook_trigger
+        self.webhook_history = webhook_history
         self._clients: set[queue.Queue] = set()
         self._clients_lock = threading.Lock()
         self._static = {
@@ -142,6 +144,14 @@ class WebServer:
             "state": "unknown", "idle_remaining_seconds": None,
         }
         return {**self.avr.snapshot(), "playback": playback, "max_volume": self.avr.max_volume}
+
+    def debug_history(self) -> dict[str, Any]:
+        avr = self.avr.history()
+        return {
+            "avr_updates": avr["updates"],
+            "avr_commands": avr["commands"],
+            "webhooks": self.webhook_history() if self.webhook_history is not None else [],
+        }
 
     def _broadcast_playback(self) -> None:
         self._broadcast()
@@ -208,6 +218,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             self._json(200, {"inputs": self.app.inputs, "aliases": self.app.input_aliases})
         elif path == "/api/tags":
             self._tags()
+        elif path == "/api/debug/history":
+            self._json(200, self.app.debug_history())
         elif match := _ZONE_PATH.fullmatch(path):
             zone = normalize_zone(match[1])
             if zone is None:

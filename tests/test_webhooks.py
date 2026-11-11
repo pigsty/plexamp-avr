@@ -9,6 +9,7 @@ from unittest.mock import Mock, patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+from plexamp_avr.denon import DenonClient
 from plexamp_avr.web import WebServer
 from plexamp_avr.webhooks import TagStore, WebhookDispatcher, WebhookStore, validate_webhook, zone_events
 
@@ -341,6 +342,33 @@ class DispatcherTests(unittest.TestCase):
         self.dispatcher.handle_command("z1", "power", "off")
         self.assertTrue(self.receiver.server.requests.empty())
 
+    def test_input_hook_does_not_fire_from_stale_input_after_power_off(self):
+        self.store.create(hook(event="input", value="", url=f"{self.receiver.url}/input"))
+        self.store.create(hook(value="on", url=f"{self.receiver.url}/power-on"))
+        avr = DenonClient("unused")
+        avr.add_listener(self.dispatcher.handle_snapshot)
+        self.dispatcher.handle_snapshot(avr.snapshot())
+        for line in ("ZMON", "SITV", "ZMOFF", "ZMON", "SICD"):
+            avr._handle_line(line)
+        avr._handle_line("SIGAME")
+        self.dispatcher.stop()
+        self.assertEqual([entry["event"] for entry in reversed(self.dispatcher.history())],
+                         ["Z1 power on", "Z1 input GAME"])
+
+    def test_history_records_recent_calls_newest_first(self):
+        url = f"http://user:secret@127.0.0.1:{self.receiver.server.server_port}/ok"
+        ok = validate_webhook(hook(name="Ok", url=url))
+        self.dispatcher.call(ok, "Z1 power off")
+        self.dispatcher.call(validate_webhook(hook(name="Down", url="http://127.0.0.1:1/x")), "manual")
+        history = self.dispatcher.history()
+        self.assertEqual([(entry["name"], entry["event"], entry["status"]) for entry in history],
+                         [("Down", "manual", None), ("Ok", "Z1 power off", 200)])
+        self.assertTrue(history[0]["error"])
+        self.assertNotIn("secret", json.dumps(history))
+        for _ in range(30):
+            self.dispatcher.call(ok, "manual")
+        self.assertEqual(len(self.dispatcher.history()), 25)
+
     def test_logs_connection_failures(self):
         with self.assertLogs("plexamp_avr.webhooks", level="INFO") as logs:
             self.assertIsNone(self.dispatcher.call(validate_webhook(hook(url="http://127.0.0.1:1/x")), "Z1 power off"))
@@ -361,6 +389,9 @@ class FakeAvr:
     def send(self, command):
         self.commands.append(command)
         return True
+
+    def history(self):
+        return {"updates": [{"line": "SICD"}], "commands": [{"command": "SICD"}]}
 
 
 class ApiTests(unittest.TestCase):
@@ -383,6 +414,7 @@ class ApiTests(unittest.TestCase):
             {"MPLAY": "Apple TV"},
             self.dispatcher.handle_command,
             webhook_trigger=self.dispatcher.trigger_manual,
+            webhook_history=self.dispatcher.history,
         )
         self.server.start()
         self.addCleanup(self.server.stop)
@@ -539,6 +571,14 @@ class ApiTests(unittest.TestCase):
                 current_zones["z1"].update(state_change)
                 self.dispatcher.handle_snapshot({"zones": current_zones})
                 self.assertTrue(receiver.server.requests.empty())
+
+    def test_debug_history_api(self):
+        self.dispatcher.call(validate_webhook(hook(url="http://127.0.0.1:1/x")), "manual")
+        status, body = self.request("GET", "/api/debug/history")
+        self.assertEqual(status, 200)
+        self.assertEqual(body["avr_updates"], [{"line": "SICD"}])
+        self.assertEqual(body["avr_commands"], [{"command": "SICD"}])
+        self.assertEqual([entry["url"] for entry in body["webhooks"]], ["http://127.0.0.1:1/x"])
 
     def test_serves_pwa_install_assets(self):
         for path, expected_type in (

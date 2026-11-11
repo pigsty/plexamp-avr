@@ -88,6 +88,13 @@ The **Debug** link at the bottom opens a page showing the saved volume levels fo
 each zone and input. Its Plexamp tile shows playback state and, while the
 standby timer is active, a live countdown such as “Idle timer 33s remaining…”.
 The countdown reserves space for its digits so updates do not shift the text.
+The **Recent activity** card has tabs for the last 25 relevant AVR updates
+(power, input, volume and mute), AVR commands, and webhook calls with their
+results. Entries are newest first, refresh every two seconds while Debug is
+open, and are kept in memory until the service restarts.
+Power-off clears the published input state so the next power-on does not
+trigger input webhooks based on a stale input. Saved volume restoration is
+logged at INFO level, with echo, timing and cancellation details at DEBUG level.
 
 The **Hooks** tab lists the configured webhooks sorted by zone, event and value, and lets you add, edit,
 **duplicate** (opens a pre-filled copy, handy for webhooks with similar URLs)
@@ -158,6 +165,7 @@ JSON with `Content-Type: application/json`.
 | Method | Path | Description |
 | --- | --- | --- |
 | `GET` | `/api/status` | Connection status, state of all zones, saved volumes per zone/input (`saved_volumes`) and Plexamp playback/idle timer |
+| `GET` | `/api/debug/history` | Recent `avr_updates`, `avr_commands`, and `webhooks`, up to 25 entries each, newest first |
 | `GET` | `/api/zones/{zone}` | State of a single zone |
 | `GET` | `/api/inputs` | Inputs offered by the web UI |
 | `POST` | `/api/zones/{zone}/power` | `{"power": "on"}` or `{"power": "off"}` |
