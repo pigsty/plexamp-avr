@@ -11,6 +11,7 @@ import threading
 import time
 import uuid
 from base64 import b64encode
+from collections import deque
 from http.client import HTTPException
 from pathlib import Path
 from typing import Any
@@ -37,6 +38,7 @@ MAX_TAGS_PER_INPUT = 20
 MAX_TAGGED_INPUTS = 100
 _TAG_PATTERN = re.compile(r"[a-z0-9][a-z0-9_-]*")
 COMMAND_EVENT_DEDUPE_SECONDS = 2.0
+HISTORY_SIZE = 25
 _ID_PATTERN = re.compile(r"[0-9a-f]{1,64}")
 _HEADER_NAME = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+")
 
@@ -397,6 +399,27 @@ class WebhookDispatcher:
         self._state_lock = threading.Lock()
         self._queue: queue.Queue = queue.Queue(maxsize=100)
         self._thread: threading.Thread | None = None
+        self._history: deque[dict[str, Any]] = deque(maxlen=HISTORY_SIZE)
+        self._history_lock = threading.Lock()
+
+    def history(self) -> list[dict[str, Any]]:
+        """Recent webhook calls with their results, newest first."""
+        with self._history_lock:
+            return [dict(entry) for entry in reversed(self._history)]
+
+    def _record(self, webhook: dict[str, Any], event: str, url: str, status: int | None, error: str | None) -> None:
+        entry = {
+            "time": time.time(),
+            "name": webhook.get("name") or webhook.get("displayName") or "",
+            "id": webhook.get("id"),
+            "event": event,
+            "method": webhook["method"],
+            "url": url,
+            "status": status,
+            "error": error,
+        }
+        with self._history_lock:
+            self._history.append(entry)
 
     def start(self) -> None:
         if self._thread is None or not self._thread.is_alive():
@@ -504,6 +527,8 @@ class WebhookDispatcher:
             reason = getattr(err, "reason", err)
             LOGGER.info("Webhook %r (%s): %s %s -> failed", name, event, method, safe_url)
             LOGGER.warning("Webhook %r (%s): %s %s failed: %s", name, event, method, safe_url, reason)
+            self._record(webhook, event, safe_url, None, str(reason))
             return None
         LOGGER.info("Webhook %r (%s): %s %s -> %d", name, event, method, safe_url, status)
+        self._record(webhook, event, safe_url, status, None)
         return status

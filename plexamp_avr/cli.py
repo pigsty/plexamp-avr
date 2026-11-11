@@ -47,6 +47,7 @@ def main() -> None:
             controller,
             webhook_trigger=dispatcher.trigger_manual,
             tags=tags,
+            webhook_history=dispatcher.history,
         ).start()
     controller.run()
 
